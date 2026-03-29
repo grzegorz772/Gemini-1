@@ -134,6 +134,11 @@ export default function App() {
   const [chatMode, setChatMode] = useState<'dialogue' | 'narrative'>('dialogue');
   const [showChatOptions, setShowChatOptions] = useState(false);
   const [knownWords, setKnownWords] = useState<AnkiWord[]>([]);
+  const [ankiApkgData, setAnkiApkgData] = useState<{
+    decks: Record<string, { id: string, name: string }>,
+    models: Record<string, { id: string, name: string, flds: {name: string}[] }>,
+    db: any
+  } | null>(null);
   
   const chatEndRef = useRef<HTMLDivElement>(null);
   const engine = useRef<GeminiEngine | null>(null);
@@ -325,6 +330,30 @@ export default function App() {
 
   const syncAnki = async () => {
     setIsSyncingAnki(true);
+    
+    if (ankiApkgData) {
+      addLog(`Synchronizacja z zaimportowanego pliku .apkg...`);
+      try {
+        const deck = (Object.values(ankiApkgData.decks) as any[]).find(d => d.name === settings.ankiDeckName);
+        if (!deck) throw new Error(`Nie znaleziono deku: ${settings.ankiDeckName}`);
+        
+        const words = await anki.current.getWordsFromDb(
+          ankiApkgData.db,
+          deck.id,
+          settings.ankiFieldName,
+          settings.ankiFilterDays,
+          settings.ankiFilterStatus
+        );
+        setKnownWords(words);
+        addLog(`Pobrano ${words.length} słów z pliku .apkg.`);
+      } catch (e) {
+        addLog(`Błąd synchronizacji z .apkg: ${e instanceof Error ? e.message : 'Nieznany błąd'}`);
+      } finally {
+        setIsSyncingAnki(false);
+      }
+      return;
+    }
+
     addLog(`Rozpoczynanie synchronizacji z ${settings.ankiUrl}...`);
     try {
       const connected = await anki.current.checkConnection(settings.ankiUrl);
@@ -364,6 +393,37 @@ export default function App() {
       }
     } catch (e) {
       addLog(`Błąd: ${e instanceof Error ? e.message : 'Nieznany błąd'}`);
+    } finally {
+      setIsSyncingAnki(false);
+    }
+  };
+
+  const handleApkgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsSyncingAnki(true);
+    addLog(`Importowanie pliku .apkg: ${file.name}...`);
+    try {
+      const data = await anki.current.parseApkg(file);
+      setAnkiApkgData(data);
+      
+      const deckNames = (Object.values(data.decks) as any[]).map(d => d.name);
+      setAvailableDecks(deckNames);
+      addLog(`Zaimportowano pomyślnie. Znaleziono deki: ${deckNames.join(', ')}`);
+      
+      const firstDeck = (Object.values(data.decks) as any[])[0];
+      if (firstDeck) {
+        setSettings(prev => ({ ...prev, ankiDeckName: firstDeck.name }));
+        const firstModel = (Object.values(data.models) as any[])[0];
+        if (firstModel) {
+          const fields = (firstModel.flds as any[]).map(f => f.name);
+          setAvailableFields(fields);
+          setSettings(prev => ({ ...prev, ankiFieldName: fields[0] }));
+        }
+      }
+    } catch (e) {
+      addLog(`Błąd importu .apkg: ${e instanceof Error ? e.message : 'Nieznany błąd'}`);
     } finally {
       setIsSyncingAnki(false);
     }
@@ -705,16 +765,50 @@ export default function App() {
                 
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <label className="text-xs font-medium text-white/60">Adres URL AnkiConnect</label>
-                    <input 
-                      type="text"
-                      value={settings.ankiUrl}
-                      onChange={(e) => setSettings({...settings, ankiUrl: e.target.value})}
-                      placeholder="http://localhost:8765"
-                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:border-blue-500/50 text-sm"
-                    />
-                    <p className="text-[10px] text-white/40">Domyślnie: http://localhost:8765 (PC) lub http://localhost:8080 (Android)</p>
+                    <label className="text-xs font-medium text-white/60">Importuj plik .apkg (opcjonalnie)</label>
+                    <div className="flex gap-2">
+                      <input 
+                        type="file"
+                        accept=".apkg"
+                        onChange={handleApkgUpload}
+                        className="hidden"
+                        id="apkg-upload"
+                      />
+                      <label 
+                        htmlFor="apkg-upload"
+                        className="flex-1 bg-white/5 border border-dashed border-white/20 rounded-xl p-3 text-center cursor-pointer hover:bg-white/10 transition-all text-xs text-white/40"
+                      >
+                        {ankiApkgData ? `Załadowano: ${Object.keys(ankiApkgData.decks).length} deki` : "Kliknij, aby wybrać plik .apkg"}
+                      </label>
+                      {ankiApkgData && (
+                        <button 
+                          onClick={() => {
+                            setAnkiApkgData(null);
+                            setAvailableDecks([]);
+                            setAvailableFields([]);
+                            addLog("Wyczyszczono dane z pliku .apkg.");
+                          }}
+                          className="p-3 bg-red-500/10 text-red-400 rounded-xl hover:bg-red-500/20 transition-all"
+                        >
+                          <RefreshCw size={16} />
+                        </button>
+                      )}
+                    </div>
                   </div>
+
+                  {!ankiApkgData && (
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-white/60">Adres URL AnkiConnect</label>
+                      <input 
+                        type="text"
+                        value={settings.ankiUrl}
+                        onChange={(e) => setSettings({...settings, ankiUrl: e.target.value})}
+                        placeholder="http://localhost:8765"
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:border-blue-500/50 text-sm"
+                      />
+                      <p className="text-[10px] text-white/40">Domyślnie: http://localhost:8765 (PC) lub http://localhost:8080 (Android)</p>
+                    </div>
+                  )}
 
                   {availableDecks.length > 0 && (
                     <div className="grid grid-cols-2 gap-4">

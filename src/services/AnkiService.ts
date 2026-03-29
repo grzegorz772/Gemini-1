@@ -1,10 +1,22 @@
 import { AnkiWord } from "../types";
+import initSqlJs from 'sql.js';
+import JSZip from 'jszip';
 
 /**
- * Service for interacting with AnkiConnectAndroid
- * Zoptymalizowany pod kątem dynamicznego wyboru pól i filtrowania powtórek.
+ * Service for interacting with AnkiConnectAndroid or local .apkg files
  */
 export class AnkiService {
+  private sqlPromise: Promise<any> | null = null;
+
+  private async getSql() {
+    if (!this.sqlPromise) {
+      this.sqlPromise = initSqlJs({
+        locateFile: file => `https://sql.js.org/dist/${file}`
+      });
+    }
+    return this.sqlPromise;
+  }
+
   private async request(url: string, action: string, params?: any): Promise<any> {
     try {
       const response = await fetch(url, {
@@ -99,18 +111,14 @@ export class AnkiService {
     filterStatus: string = 'all'
   ): Promise<AnkiWord[]> {
     const safeDeckName = deckName.replace(/"/g, '');
-    
-    // Budujemy zapytanie tak, aby Anki od razu przefiltrowało ID kart.
     let query = `deck:"${safeDeckName}"`;
     
-    // Dodajemy filtry statusu do zapytania
     if (filterStatus === 'learned') {
       query += ' -is:new';
     } else if (filterStatus === 'reviewed') {
       query += ' is:review';
     }
 
-    // Dodajemy filtr czasu do zapytania
     if (daysAgo && daysAgo > 0) {
       query += ` rated:${daysAgo}`;
     }
@@ -120,15 +128,10 @@ export class AnkiService {
     let cardIds: number[] = [];
     
     try {
-      // Próbujemy pobrać przefiltrowane ID kart
       cardIds = await this.request(url, 'findCards', { query });
       console.log(`[AnkiService] findCards zwróciło ${cardIds.length} ID.`);
-      
-      // Jeśli zapytanie z filtrami zwróciło 0, a mamy filtry, to może filtr jest zbyt restrykcyjny 
-      // lub API go nie rozumie. Ale jeśli zwróciło > 0, to super.
     } catch (e: any) {
       console.warn(`[AnkiService] findCards z filtrami nie powiodło się: ${e.message}. Próba fallbacku.`);
-      // Fallback: pobieramy wszystko z deku i przefiltrujemy w JS
       const basicQuery = `deck:"${safeDeckName}"`;
       try {
         cardIds = await this.request(url, 'findCards', { query: basicQuery });
@@ -139,24 +142,15 @@ export class AnkiService {
       }
     }
 
-    if (!cardIds || cardIds.length === 0) {
-      console.log("[AnkiService] Brak kart spełniających kryteria (ID = 0).");
-      return [];
-    }
+    if (!cardIds || cardIds.length === 0) return [];
 
-    // Jeśli mamy bardzo dużo kart (np. > 2000), a filtr API nie zadziałał (fallback), 
-    // to pobieranie wszystkiego będzie trwało wieki.
     if (cardIds.length > 2000) {
-      console.warn(`[AnkiService] Wykryto bardzo dużą liczbę kart (${cardIds.length}). Ograniczam do pierwszych 2000.`);
       cardIds = cardIds.slice(0, 2000);
     }
 
-    // Jeśli mamy bardzo dużo kart, dzielimy na mniejsze paczki
     const chunks = this.chunkArray(cardIds, 50);
     let allWords: AnkiWord[] = [];
     const now = Date.now();
-
-    console.log(`[AnkiService] Rozpoczynam pobieranie cardsInfo dla ${cardIds.length} kart w ${chunks.length} paczkach.`);
 
     for (const chunk of chunks) {
       try {
@@ -164,73 +158,138 @@ export class AnkiService {
         if (!cardsData) continue;
 
         const statusMap: Record<number, AnkiWord['status']> = {
-          0: 'new',
-          1: 'learning',
-          2: 'review',
-          3: 'relearning'
+          0: 'new', 1: 'learning', 2: 'review', 3: 'relearning'
         };
 
         const mapped = cardsData.map((card: any) => {
           const rawContent = card.fields && card.fields[targetField] ? card.fields[targetField].value : "";
           const cleanWord = rawContent.replace(/<[^>]*>/g, '').trim();
-
           const allFields: Record<string, string> = {};
           if (card.fields) {
             Object.keys(card.fields).forEach(k => {
               allFields[k] = card.fields[k].value.replace(/<[^>]*>/g, '').trim();
             });
           }
-
-          // card.mod to czas modyfikacji (sekundy), często zbieżny z ostatnią powtórką
-          const lastReviewTime = card.mod ? card.mod * 1000 : 0;
-
           return {
             word: cleanWord,
             fields: allFields,
             interval: card.interval || 0,
             reps: card.reps || 0,
             status: statusMap[card.type] || 'new',
-            lastReview: lastReviewTime
+            lastReview: card.mod ? card.mod * 1000 : 0
           };
         });
 
-        // FILTROWANIE PO STRONIE KLIENTA (zawsze robimy dla pewności i jako fallback)
         const filtered = mapped.filter((w: AnkiWord) => {
-          // 1. Filtr statusu
-          if (filterStatus === 'learned') {
-            if (w.status === 'new') return false;
-          } else if (filterStatus === 'reviewed') {
-            if (w.status !== 'review') return false;
-          }
-
-          // 2. Filtr czasu (daysAgo)
-          // Jeśli API przefiltrowało poprawnie, to ten warunek i tak przejdzie.
-          // Jeśli API zawiodło i mamy fallback, to filtrujemy po modyfikacji (mod).
+          if (filterStatus === 'learned' && w.status === 'new') return false;
+          if (filterStatus === 'reviewed' && w.status !== 'review') return false;
           if (daysAgo && daysAgo > 0) {
             if (!w.lastReview) return false;
             const diffDays = (now - w.lastReview) / (1000 * 60 * 60 * 24);
             if (diffDays > daysAgo) return false;
           }
-
           return true;
         });
 
         allWords = allWords.concat(filtered);
-        
-        // Jeśli pobraliśmy już wystarczająco dużo (np. 1000), a deck jest gigantyczny, 
-        // to przerywamy, żeby nie blokować UI na wieki.
-        if (allWords.length >= 1000) {
-          console.log("[AnkiService] Osiągnięto limit 1000 przefiltrowanych słów, kończę.");
-          break;
-        }
+        if (allWords.length >= 1000) break;
       } catch (chunkErr: any) {
         console.error(`[AnkiService] Błąd podczas pobierania paczki kart: ${chunkErr.message}`);
         continue;
       }
     }
 
-    console.log(`[AnkiService] Finalnie pobrano i przefiltrowano: ${allWords.length} słów.`);
     return allWords;
+  }
+
+  async parseApkg(file: File): Promise<{
+    decks: Record<string, { id: string, name: string }>,
+    models: Record<string, { id: string, name: string, flds: {name: string}[] }>,
+    db: any
+  }> {
+    const zip = await JSZip.loadAsync(file);
+    const dbFile = zip.file("collection.anki21") || zip.file("collection.anki2");
+    if (!dbFile) throw new Error("Nie znaleziono bazy danych w pliku .apkg");
+
+    const dbData = await dbFile.async("uint8array");
+    const SQL = await this.getSql();
+    const db = new SQL.Database(dbData);
+
+    const colResult = db.exec("SELECT models, decks FROM col");
+    if (colResult.length === 0) throw new Error("Błąd odczytu tabeli col");
+
+    const models = JSON.parse(colResult[0].values[0][0] as string);
+    const decks = JSON.parse(colResult[0].values[0][1] as string);
+
+    return { decks, models, db };
+  }
+
+  async getWordsFromDb(
+    db: any,
+    deckId: string,
+    targetFieldName: string,
+    daysAgo?: number,
+    filterStatus: string = 'all'
+  ): Promise<AnkiWord[]> {
+    const now = Date.now();
+    const query = `
+      SELECT n.flds, c.type, c.ivl, c.reps, c.mod, n.mid
+      FROM notes n
+      JOIN cards c ON n.id = c.nid
+      WHERE c.did = ${deckId}
+    `;
+
+    const result = db.exec(query);
+    if (result.length === 0) return [];
+
+    const rows = result[0].values;
+    const colResult = db.exec("SELECT models FROM col");
+    const models = JSON.parse(colResult[0].values[0][0] as string);
+
+    const statusMap: Record<number, AnkiWord['status']> = {
+      0: 'new', 1: 'learning', 2: 'review', 3: 'relearning'
+    };
+
+    const words: AnkiWord[] = rows.map((row: any) => {
+      const flds = (row[0] as string).split('\u001f');
+      const type = row[1] as number;
+      const ivl = row[2] as number;
+      const reps = row[3] as number;
+      const mod = row[4] as number;
+      const mid = row[5] as string;
+
+      const model = models[mid];
+      const fields: Record<string, string> = {};
+      let word = "";
+
+      if (model && model.flds) {
+        model.flds.forEach((f: any, idx: number) => {
+          const val = flds[idx] ? flds[idx].replace(/<[^>]*>/g, '').trim() : "";
+          fields[f.name] = val;
+          if (f.name === targetFieldName) word = val;
+        });
+      }
+
+      return {
+        word,
+        fields,
+        interval: ivl,
+        reps: reps,
+        status: statusMap[type] || 'new',
+        lastReview: mod * 1000
+      };
+    });
+
+    return words.filter(w => {
+      if (filterStatus === 'learned' && w.status === 'new') return false;
+      if (filterStatus === 'reviewed' && w.status !== 'review') return false;
+      if (daysAgo && daysAgo > 0) {
+        if (!w.lastReview) return false;
+        const diffDays = (now - w.lastReview) / (1000 * 60 * 60 * 24);
+        if (diffDays > daysAgo) return false;
+      }
+      return true;
+    });
   }
 
   private chunkArray(arr: any[], size: number) {
