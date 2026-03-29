@@ -13,6 +13,10 @@ export interface UserSettings {
   ankiLimitToKnown: boolean;
   ankiIntervalDays: number;
   ankiUrl: string;
+  ankiDeckName: string;
+  ankiFieldName: string;
+  ankiFilterDays: number;
+  ankiFilterStatus: 'all' | 'learned' | 'reviewed';
 }
 
 export interface GrammarSubsection {
@@ -44,6 +48,9 @@ export interface Message {
 
 export interface AnkiWord {
   word: string;
+  fields: Record<string, string>;
   interval: number; // in days
-  status: 'known' | 'learning';
+  status: 'new' | 'learning' | 'review' | 'relearning';
+  reps: number;
+  lastReview?: number; // timestamp
 }

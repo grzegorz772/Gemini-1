@@ -48,15 +48,38 @@ export class AnkiService {
   }
 
   async getWordsFromDeck(url: string, deckName: string): Promise<AnkiWord[]> {
-    const noteIds = await this.request(url, 'findNotes', { query: `deck:"${deckName}"` });
-    if (!noteIds || noteIds.length === 0) return [];
+    const cardIds = await this.request(url, 'findCards', { query: `deck:"${deckName}"` });
+    if (!cardIds || cardIds.length === 0) return [];
 
-    const notesData = await this.request(url, 'notesInfo', { notes: noteIds });
+    const cardsData = await this.request(url, 'cardsInfo', { cards: cardIds });
     
-    return (notesData || []).map((note: any) => ({
-      word: note.fields.Front?.value || note.fields.Word?.value || "",
-      interval: 0, // Simplified
-      status: 'known'
-    }));
+    return (cardsData || []).map((card: any) => {
+      // Extract all fields
+      const fields: Record<string, string> = {};
+      Object.keys(card.fields).forEach(key => {
+        fields[key] = card.fields[key].value.replace(/<[^>]*>/g, '').trim();
+      });
+
+      // Default word (will be overridden by selected field in UI)
+      const word = fields.Front || fields.Word || fields.Text || Object.values(fields)[0] || "";
+      
+      // Map Anki card types to our status
+      // 0=new, 1=learning, 2=review, 3=relearning
+      const statusMap: Record<number, AnkiWord['status']> = {
+        0: 'new',
+        1: 'learning',
+        2: 'review',
+        3: 'relearning'
+      };
+
+      return {
+        word,
+        fields,
+        interval: card.interval || 0,
+        reps: card.reps || 0,
+        status: statusMap[card.type] || 'new',
+        lastReview: card.mod * 1000 // Convert to timestamp
+      };
+    });
   }
 }

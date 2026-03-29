@@ -16,6 +16,10 @@ export class GeminiEngine {
     mode: 'dialogue' | 'narrative',
     knownWords?: string[]
   ): Promise<Message> {
+    const vocabularyConstraint = settings.ankiLimitToKnown && knownWords && knownWords.length > 0
+      ? `MANDATORY: Use ONLY words from this raw list: [${knownWords.join(', ')}]. Do not use any other words in ${settings.targetLanguage}. If you must use a word outside this list (like a preposition or extremely basic word), keep it to an absolute minimum.`
+      : '';
+
     const systemInstruction = `
       You are a language learning assistant. 
       Native Language: ${settings.nativeLanguage}
@@ -32,7 +36,7 @@ export class GeminiEngine {
          }
       2. Split your response into logical sentences.
       3. If the user made a mistake in their last message, provide a correction and a brief explanation in ${settings.nativeLanguage}.
-      4. ${settings.ankiLimitToKnown && knownWords ? `ONLY use words from this list: ${knownWords.join(', ')}. If you must use a word outside, keep it extremely simple.` : ''}
+      4. ${vocabularyConstraint}
       5. Keep the conversation engaging.
     `;
 
@@ -71,8 +75,13 @@ export class GeminiEngine {
     }
   }
 
-  async generateTopic(settings: UserSettings) {
+  async generateTopic(settings: UserSettings, knownWords?: string[]) {
+    const vocabularyConstraint = settings.ankiLimitToKnown && knownWords && knownWords.length > 0
+      ? `The topic and description MUST encourage using ONLY these words: [${knownWords.join(', ')}].`
+      : '';
+
     const prompt = `Generate a creative writing topic for a ${settings.targetLanguage} learner at ${settings.cefrLevel} level. 
+    ${vocabularyConstraint}
     Return JSON: { "topic": "Short Title", "description": "Detailed instructions in ${settings.nativeLanguage}" }`;
 
     const response = await this.ai.models.generateContent({
@@ -83,10 +92,10 @@ export class GeminiEngine {
     return JSON.parse(response.text);
   }
 
-  async checkSentence(settings: UserSettings, text: string) {
-    const prompt = `Check this text in ${settings.targetLanguage}: "${text}". 
-    Is it grammatically correct for ${settings.cefrLevel} level? If there are multiple sentences, check all of them.
-    Return JSON: { "isCorrect": boolean, "corrected": "Corrected version of the whole text", "explanation": "Brief explanation of errors in ${settings.nativeLanguage}" }`;
+  async checkSentence(settings: UserSettings, sentence: string) {
+    const prompt = `Check this single sentence in ${settings.targetLanguage}: "${sentence}". 
+    Is it grammatically correct for ${settings.cefrLevel} level?
+    Return JSON: { "isCorrect": boolean, "corrected": "...", "explanation": "Brief explanation in ${settings.nativeLanguage}" }`;
 
     const response = await this.ai.models.generateContent({
       model: this.model,
@@ -98,48 +107,21 @@ export class GeminiEngine {
 
   async generateExercises(
     settings: UserSettings,
-    topics: { title: string; levelInfo?: string[] }[],
+    grammarTopic: string,
     type: string,
-    count: number
+    count: number,
+    levelInfo?: string[],
+    knownWords?: string[]
   ) {
-    const topicsStr = topics.map(t => t.title).join(', ');
-    const levelInfoStr = topics.map(t => t.levelInfo ? `${t.title}: ${t.levelInfo.join(', ')}` : '').filter(Boolean).join('\n');
+    const vocabularyConstraint = settings.ankiLimitToKnown && knownWords && knownWords.length > 0
+      ? `MANDATORY: Use ONLY words from this raw list for the questions and answers: [${knownWords.join(', ')}]. Do not use any other words in ${settings.targetLanguage}.`
+      : '';
 
     const prompt = `Generate ${count} exercises of type "${type}" for ${settings.targetLanguage} learners at ${settings.cefrLevel} level. 
-    Focus on these grammar topics: ${topicsStr}.
-    ${levelInfoStr ? `Specific points to cover for this level:\n${levelInfoStr}` : ''}
+    Focus on: ${grammarTopic}.
+    ${levelInfo ? `Specific points to cover for this level: ${levelInfo.join(', ')}` : ''}
+    ${vocabularyConstraint}
     Return as a JSON array of objects: { "question": "...", "answer": "...", "explanation": "..." }`;
-
-    const response = await this.ai.models.generateContent({
-      model: this.model,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json"
-      }
-    });
-
-    return JSON.parse(response.text);
-  }
-
-  async generateTheory(
-    settings: UserSettings,
-    topics: { title: string; levelInfo?: string[] }[]
-  ) {
-    const topicsStr = topics.map(t => t.title).join(', ');
-    const levelInfoStr = topics.map(t => t.levelInfo ? `${t.title}: ${t.levelInfo.join(', ')}` : '').filter(Boolean).join('\n');
-
-    const prompt = `Generate a comprehensive grammar theory guide in ${settings.nativeLanguage} for ${settings.targetLanguage} learners at ${settings.cefrLevel} level.
-    Cover the following topics: ${topicsStr}.
-    ${levelInfoStr ? `Ensure you cover these specific points for this level:\n${levelInfoStr}` : ''}
-    
-    Return as a JSON array of chapters. Each chapter should correspond to a topic or subtopic.
-    Format:
-    [
-      {
-        "title": "Chapter Title",
-        "content": "Detailed explanation using Markdown formatting. Include examples in ${settings.targetLanguage} with translations in ${settings.nativeLanguage}."
-      }
-    ]`;
 
     const response = await this.ai.models.generateContent({
       model: this.model,

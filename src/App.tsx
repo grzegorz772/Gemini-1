@@ -5,7 +5,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import ReactMarkdown from 'react-markdown';
 import { 
   Send, 
   ChevronRight, 
@@ -39,7 +38,11 @@ const DEFAULT_SETTINGS: UserSettings = {
   useStudioKey: true,
   ankiLimitToKnown: false,
   ankiIntervalDays: 4,
-  ankiUrl: 'http://localhost:8080',
+  ankiUrl: 'http://localhost:8765',
+  ankiDeckName: '',
+  ankiFieldName: '',
+  ankiFilterDays: 30,
+  ankiFilterStatus: 'all',
 };
 
 const ChatMessage: React.FC<{ message: Message; settings: UserSettings }> = ({ message, settings }) => {
@@ -55,8 +58,8 @@ const ChatMessage: React.FC<{ message: Message; settings: UserSettings }> = ({ m
           className={`
             p-4 rounded-2xl transition-all
             ${isModel 
-              ? 'bg-white/5 backdrop-blur-3xl border border-white/10 rounded-tl-none shadow-[inset_0_1px_1px_rgba(255,255,255,0.2),0_4px_16px_rgba(0,0,0,0.2)]' 
-              : 'bg-gradient-to-br from-blue-500 to-purple-600 text-white rounded-tr-none shadow-[inset_0_1px_1px_rgba(255,255,255,0.3),0_8px_20px_rgba(59,130,246,0.4)]'}
+              ? 'bg-white/10 backdrop-blur-xl border border-white/20 rounded-tl-none' 
+              : 'bg-gradient-to-br from-blue-600 to-blue-700 text-white rounded-tr-none shadow-lg shadow-blue-500/20'}
           `}
         >
           {isModel && message.sentences ? (
@@ -150,17 +153,39 @@ export default function App() {
   const [userAnswer, setUserAnswer] = useState('');
   const [exerciseFeedback, setExerciseFeedback] = useState<any>(null);
   const [exerciseConfig, setExerciseConfig] = useState<{
-    topics: { title: string; levelInfo?: string[] }[];
+    topic: string;
     type: string;
     count: number;
-  }>({ topics: [], type: 'fill in the blank', count: 5 });
-
-  const [theoryData, setTheoryData] = useState<{ title: string; content: string }[] | null>(null);
-  const [isGeneratingTheory, setIsGeneratingTheory] = useState(false);
-  const [isTheoryModalOpen, setIsTheoryModalOpen] = useState(false);
+    levelInfo?: string[];
+  }>({ topic: '', type: 'fill in the blank', count: 5 });
 
   const [ankiLogs, setAnkiLogs] = useState<string[]>([]);
   const [isSyncingAnki, setIsSyncingAnki] = useState(false);
+  const [availableDecks, setAvailableDecks] = useState<string[]>([]);
+  const [availableFields, setAvailableFields] = useState<string[]>([]);
+
+  const getFilteredWords = () => {
+    if (!knownWords.length) return [];
+    
+    return knownWords.map(word => ({
+      ...word,
+      word: settings.ankiFieldName ? (word.fields[settings.ankiFieldName] || word.word) : word.word
+    })).filter(word => {
+      // Filter by status
+      if (settings.ankiFilterStatus === 'learned' && word.status === 'new') return false;
+      if (settings.ankiFilterStatus === 'reviewed' && word.status !== 'review') return false;
+      
+      // Filter by days since last review
+      if (word.lastReview) {
+        const diffDays = (Date.now() - word.lastReview) / (1000 * 60 * 60 * 24);
+        if (diffDays > settings.ankiFilterDays) return false;
+      }
+      
+      return true;
+    });
+  };
+
+  const filteredWordsList = getFilteredWords();
 
   const addLog = (msg: string) => {
     setAnkiLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 10));
@@ -192,7 +217,7 @@ export default function App() {
         inputText, 
         settings, 
         chatMode,
-        settings.ankiLimitToKnown ? knownWords.map(w => w.word) : undefined
+        settings.ankiLimitToKnown ? filteredWordsList.map(w => w.word) : undefined
       );
       setMessages(prev => [...prev, response]);
     } catch (error) {
@@ -205,6 +230,15 @@ export default function App() {
   const handleWritingChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setWritingText(val);
+
+    // Check for sentence completion (dot)
+    if (val.endsWith('.') && val !== lastCheckedSentence) {
+      const sentences = val.split(/[.!?]/).filter(s => s.trim().length > 0);
+      const lastSentence = sentences[sentences.length - 1];
+      if (lastSentence && lastSentence !== lastCheckedSentence) {
+        checkSentence(lastSentence);
+      }
+    }
   };
 
   const checkSentence = async (sentence: string) => {
@@ -213,7 +247,11 @@ export default function App() {
     setLastCheckedSentence(sentence);
     try {
       const feedback = await engine.current.checkSentence(settings, sentence);
-      setWritingSentenceFeedback(feedback);
+      if (!feedback.isCorrect) {
+        setWritingSentenceFeedback(feedback);
+      } else {
+        setWritingSentenceFeedback(null);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -225,7 +263,10 @@ export default function App() {
     if (!engine.current) return;
     setIsGeneratingTopic(true);
     try {
-      const topic = await engine.current.generateTopic(settings);
+      const topic = await engine.current.generateTopic(
+        settings,
+        settings.ankiLimitToKnown ? filteredWordsList.map(w => w.word) : undefined
+      );
       setWritingTopic(topic);
       setWritingText('');
       setWritingSentenceFeedback(null);
@@ -237,25 +278,19 @@ export default function App() {
   };
 
   const startExercises = async () => {
-    if (!engine.current || exerciseConfig.topics.length === 0) return;
+    if (!engine.current || !exerciseConfig.topic) return;
     setIsGeneratingExercises(true);
-    setIsGeneratingTheory(true);
     setActiveExercise(true);
     try {
-      const [exercises, theory] = await Promise.all([
-        engine.current.generateExercises(
-          settings, 
-          exerciseConfig.topics, 
-          exerciseConfig.type, 
-          exerciseConfig.count
-        ),
-        engine.current.generateTheory(
-          settings,
-          exerciseConfig.topics
-        )
-      ]);
+      const exercises = await engine.current.generateExercises(
+        settings, 
+        exerciseConfig.topic, 
+        exerciseConfig.type, 
+        exerciseConfig.count,
+        exerciseConfig.levelInfo,
+        settings.ankiLimitToKnown ? filteredWordsList.map(w => w.word) : undefined
+      );
       setExerciseList(exercises);
-      setTheoryData(theory);
       setExerciseIndex(0);
       setExerciseFeedback(null);
       setUserAnswer('');
@@ -264,7 +299,6 @@ export default function App() {
       setActiveExercise(null);
     } finally {
       setIsGeneratingExercises(false);
-      setIsGeneratingTheory(false);
     }
   };
 
@@ -297,11 +331,27 @@ export default function App() {
       if (connected) {
         addLog("Połączono pomyślnie z AnkiConnect.");
         const decks = await anki.current.getDeckNames(settings.ankiUrl);
+        setAvailableDecks(decks);
         addLog(`Znaleziono deki: ${decks.join(', ')}`);
-        if (decks.length > 0) {
-          const words = await anki.current.getWordsFromDeck(settings.ankiUrl, decks[0]);
+        
+        const targetDeck = settings.ankiDeckName || decks[0];
+        if (targetDeck) {
+          addLog(`Pobieranie słów z deku: ${targetDeck}...`);
+          const words = await anki.current.getWordsFromDeck(settings.ankiUrl, targetDeck);
           setKnownWords(words);
-          addLog(`Pobrano ${words.length} słów z deku ${decks[0]}.`);
+          
+          if (words.length > 0) {
+            const fields = Object.keys(words[0].fields);
+            setAvailableFields(fields);
+            if (!settings.ankiFieldName || !fields.includes(settings.ankiFieldName)) {
+              setSettings(prev => ({ ...prev, ankiFieldName: fields[0] }));
+            }
+          }
+          
+          addLog(`Pobrano ${words.length} słów z deku ${targetDeck}.`);
+          if (!settings.ankiDeckName) {
+            setSettings(prev => ({ ...prev, ankiDeckName: targetDeck }));
+          }
         }
       }
     } catch (e) {
@@ -312,12 +362,12 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-transparent text-white font-sans selection:bg-blue-500/30 overflow-x-hidden">
-      {/* Liquid Background */}
-      <div className="liquid-bg">
-        <div className="liquid-orb-1" />
-        <div className="liquid-orb-2" />
-        <div className="liquid-orb-3" />
+    <div className="min-h-screen bg-[#050505] text-white font-sans selection:bg-blue-500/30 overflow-x-hidden">
+      {/* Background Blobs */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-blue-600/20 blur-[120px] rounded-full animate-pulse" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-purple-600/20 blur-[120px] rounded-full animate-pulse" style={{ animationDelay: '2s' }} />
+        <div className="absolute top-[20%] right-[10%] w-[30%] h-[30%] bg-cyan-500/10 blur-[100px] rounded-full" />
       </div>
 
       <main className="relative z-10 pb-32 pt-10 px-6 max-w-2xl mx-auto">
@@ -352,14 +402,14 @@ export default function App() {
                 <GlassCard className="mb-6 p-4 flex gap-4">
                   <button 
                     onClick={() => setChatMode('dialogue')}
-                    className={`flex-1 p-4 rounded-2xl border transition-all backdrop-blur-xl ${chatMode === 'dialogue' ? 'bg-blue-500/20 border-blue-500/50 shadow-[inset_0_1px_1px_rgba(59,130,246,0.4)]' : 'bg-white/5 border-white/10 shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)]'}`}
+                    className={`flex-1 p-4 rounded-2xl border transition-all ${chatMode === 'dialogue' ? 'bg-blue-500/20 border-blue-500/50' : 'border-white/10'}`}
                   >
                     <MessageSquare className="mx-auto mb-2" />
                     <span className="text-xs font-bold">Dialog</span>
                   </button>
                   <button 
                     onClick={() => setChatMode('narrative')}
-                    className={`flex-1 p-4 rounded-2xl border transition-all backdrop-blur-xl ${chatMode === 'narrative' ? 'bg-purple-500/20 border-purple-500/50 shadow-[inset_0_1px_1px_rgba(168,85,247,0.4)]' : 'bg-white/5 border-white/10 shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)]'}`}
+                    className={`flex-1 p-4 rounded-2xl border transition-all ${chatMode === 'narrative' ? 'bg-purple-500/20 border-purple-500/50' : 'border-white/10'}`}
                   >
                     <Gamepad2 className="mx-auto mb-2" />
                     <span className="text-xs font-bold">Narracja</span>
@@ -394,11 +444,11 @@ export default function App() {
                   onChange={(e) => setInputText(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                   placeholder="Napisz coś..."
-                  className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-6 pr-16 focus:outline-none focus:border-blue-500/50 backdrop-blur-3xl transition-all shadow-[inset_0_2px_8px_rgba(0,0,0,0.2)]"
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-6 pr-16 focus:outline-none focus:border-blue-500/50 backdrop-blur-xl transition-all"
                 />
                 <button
                   onClick={handleSendMessage}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-3 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl text-white shadow-[0_4px_16px_rgba(59,130,246,0.4)] hover:scale-105 active:scale-95 transition-all"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-3 bg-blue-500 rounded-xl text-white shadow-lg shadow-blue-500/20 hover:scale-105 active:scale-95 transition-all"
                 >
                   <Send size={20} />
                 </button>
@@ -431,8 +481,8 @@ export default function App() {
                   <textarea
                     value={writingText}
                     onChange={handleWritingChange}
-                    className="w-full h-64 bg-white/5 backdrop-blur-3xl border border-white/10 rounded-2xl p-6 focus:outline-none focus:border-blue-500/50 transition-all resize-none shadow-[inset_0_2px_8px_rgba(0,0,0,0.2)]"
-                    placeholder="Zacznij pisać wypracowanie. Kliknij 'Sprawdź tekst', aby AI przeanalizowało Twoją gramatykę..."
+                    className="w-full h-64 bg-black/20 border border-white/10 rounded-2xl p-6 focus:outline-none focus:border-blue-500/50 transition-all resize-none"
+                    placeholder="Zacznij pisać wypracowanie. Po każdej kropce AI sprawdzi Twoje zdanie..."
                   />
                   {isCheckingSentence && (
                     <div className="absolute bottom-4 right-4 flex items-center gap-2 text-[10px] text-white/40 uppercase tracking-widest">
@@ -442,37 +492,19 @@ export default function App() {
                   )}
                 </div>
 
-                <div className="flex justify-end">
-                  <GlassButton 
-                    onClick={() => {
-                      if (writingText.trim().length > 0) {
-                        checkSentence(writingText);
-                      }
-                    }} 
-                    disabled={isCheckingSentence || writingText.trim().length === 0}
-                  >
-                    {isCheckingSentence ? <RefreshCw className="animate-spin mr-2 inline" size={18} /> : <CheckCircle2 className="mr-2 inline" size={18} />}
-                    Sprawdź tekst
-                  </GlassButton>
-                </div>
-
                 <AnimatePresence>
                   {writingSentenceFeedback && (
                     <motion.div
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 10 }}
-                      className={`p-4 rounded-xl border ${writingSentenceFeedback.isCorrect ? 'bg-green-500/10 border-green-500/30' : 'bg-amber-500/10 border-amber-500/30'}`}
+                      className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl"
                     >
-                      <div className={`flex items-center gap-2 mb-2 ${writingSentenceFeedback.isCorrect ? 'text-green-400' : 'text-amber-400'}`}>
-                        {writingSentenceFeedback.isCorrect ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
-                        <span className="font-bold text-sm">
-                          {writingSentenceFeedback.isCorrect ? 'Świetnie! Tekst jest poprawny.' : 'Uwagi do tekstu:'}
-                        </span>
+                      <div className="flex items-center gap-2 mb-2 text-amber-400">
+                        <AlertCircle size={16} />
+                        <span className="font-bold text-sm">Uwaga do ostatniego zdania:</span>
                       </div>
-                      {!writingSentenceFeedback.isCorrect && (
-                        <p className="text-sm mb-1">Poprawnie: <span className="text-green-400">{writingSentenceFeedback.corrected}</span></p>
-                      )}
+                      <p className="text-sm mb-1">Poprawnie: <span className="text-green-400">{writingSentenceFeedback.corrected}</span></p>
                       <p className="text-xs text-white/60">{writingSentenceFeedback.explanation}</p>
                     </motion.div>
                   )}
@@ -488,20 +520,7 @@ export default function App() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
             >
-              <div className="flex items-center justify-between mb-8">
-                <h1 className="text-3xl font-bold">Ćwiczenia</h1>
-                {activeExercise && !isGeneratingExercises && (
-                  <GlassButton 
-                    variant="ghost" 
-                    onClick={() => setIsTheoryModalOpen(true)}
-                    disabled={isGeneratingTheory}
-                    className="flex items-center gap-2"
-                  >
-                    {isGeneratingTheory ? <RefreshCw size={16} className="animate-spin" /> : <BookOpen size={16} />}
-                    Teoria
-                  </GlassButton>
-                )}
-              </div>
+              <h1 className="text-3xl font-bold mb-8">Ćwiczenia</h1>
               
               {activeExercise ? (
                 <div className="space-y-6">
@@ -536,7 +555,7 @@ export default function App() {
                           value={userAnswer}
                           onChange={(e) => setUserAnswer(e.target.value)}
                           placeholder="Twoja odpowiedź..."
-                          className="w-full bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-4 outline-none focus:border-blue-500/50 shadow-[inset_0_2px_8px_rgba(0,0,0,0.2)]"
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-4 outline-none focus:border-blue-500/50"
                         />
                         {!exerciseFeedback ? (
                           <GlassButton onClick={checkExercise} className="w-full">Sprawdź</GlassButton>
@@ -565,18 +584,14 @@ export default function App() {
                     <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">Konfiguracja Ćwiczeń</h3>
                     
                     <div className="space-y-2">
-                      <label className="text-xs font-medium text-white/60">Wybrane tematy gramatyczne</label>
-                      <div className="w-full bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-3 min-h-[50px] flex flex-wrap gap-2 shadow-[inset_0_2px_8px_rgba(0,0,0,0.2)]">
-                        {exerciseConfig.topics.length > 0 ? (
-                          exerciseConfig.topics.map((t, i) => (
-                            <span key={i} className="bg-blue-500/20 text-blue-300 px-2 py-1 rounded-md text-xs">
-                              {t.title}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-white/40 text-sm">Wybierz tematy z listy poniżej...</span>
-                        )}
-                      </div>
+                      <label className="text-xs font-medium text-white/60">Temat gramatyczny</label>
+                      <input 
+                        type="text"
+                        value={exerciseConfig.topic}
+                        onChange={(e) => setExerciseConfig({...exerciseConfig, topic: e.target.value})}
+                        placeholder="np. Present Simple, Passive Voice..."
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:border-blue-500/50"
+                      />
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
@@ -585,13 +600,13 @@ export default function App() {
                         <select 
                           value={exerciseConfig.type}
                           onChange={(e) => setExerciseConfig({...exerciseConfig, type: e.target.value})}
-                          className="w-full bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-3 outline-none shadow-[inset_0_2px_8px_rgba(0,0,0,0.2)]"
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none"
                         >
-                          <option value="fill in the blank" className="bg-slate-900">Luki</option>
-                          <option value="sentence transformation" className="bg-slate-900">Transformacja</option>
-                          <option value="translation" className="bg-slate-900">Tłumaczenie</option>
-                          <option value="error correction" className="bg-slate-900">Poprawa błędów</option>
-                          <option value="reorder sentence" className="bg-slate-900">Kolejność</option>
+                          <option value="fill in the blank">Luki</option>
+                          <option value="sentence transformation">Transformacja</option>
+                          <option value="translation">Tłumaczenie</option>
+                          <option value="error correction">Poprawa błędów</option>
+                          <option value="reorder sentence">Kolejność</option>
                         </select>
                       </div>
                       <div className="space-y-2">
@@ -600,36 +615,26 @@ export default function App() {
                           type="number"
                           value={exerciseConfig.count}
                           onChange={(e) => setExerciseConfig({...exerciseConfig, count: parseInt(e.target.value)})}
-                          className="w-full bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-3 outline-none shadow-[inset_0_2px_8px_rgba(0,0,0,0.2)]"
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none"
                         />
                       </div>
                     </div>
 
-                    <GlassButton onClick={startExercises} className="w-full" disabled={exerciseConfig.topics.length === 0}>
+                    <GlassButton onClick={startExercises} className="w-full" disabled={!exerciseConfig.topic}>
                       Generuj ćwiczenia
                     </GlassButton>
                   </GlassCard>
 
                   <div className="grid gap-4">
-                    <p className="text-xs font-bold text-white/40 uppercase tracking-widest px-2">Wybierz tematy z programu</p>
+                    <p className="text-xs font-bold text-white/40 uppercase tracking-widest px-2">Wybierz temat z programu</p>
                     <GrammarTree 
                       sections={settings.targetLanguage === 'de' ? GERMAN_GRAMMAR : settings.targetLanguage === 'es' ? SPANISH_GRAMMAR : ENGLISH_GRAMMAR}
                       cefrLevel={settings.cefrLevel}
-                      selectedTopics={exerciseConfig.topics}
-                      onToggleTopic={(item) => {
-                        const exists = exerciseConfig.topics.some(t => t.title === item.title);
-                        if (exists) {
-                          setExerciseConfig({
-                            ...exerciseConfig,
-                            topics: exerciseConfig.topics.filter(t => t.title !== item.title)
-                          });
-                        } else {
-                          setExerciseConfig({
-                            ...exerciseConfig,
-                            topics: [...exerciseConfig.topics, { title: item.title, levelInfo: item.levelInfo?.[settings.cefrLevel] }]
-                          });
-                        }
-                      }}
+                      onSelect={(item) => setExerciseConfig({
+                        ...exerciseConfig, 
+                        topic: item.title,
+                        levelInfo: item.levelInfo?.[settings.cefrLevel]
+                      })}
                     />
                   </div>
                 </div>
@@ -666,10 +671,10 @@ export default function App() {
                     <select 
                       value={settings.nativeLanguage}
                       onChange={(e) => setSettings({...settings, nativeLanguage: e.target.value as any})}
-                      className="w-full bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-3 outline-none shadow-[inset_0_2px_8px_rgba(0,0,0,0.2)]"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none"
                     >
-                      <option value="pl" className="bg-slate-900">Polski</option>
-                      <option value="en" className="bg-slate-900">Angielski</option>
+                      <option value="pl">Polski</option>
+                      <option value="en">Angielski</option>
                     </select>
                   </div>
                   <div className="space-y-2">
@@ -677,26 +682,11 @@ export default function App() {
                     <select 
                       value={settings.targetLanguage}
                       onChange={(e) => setSettings({...settings, targetLanguage: e.target.value as any})}
-                      className="w-full bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-3 outline-none shadow-[inset_0_2px_8px_rgba(0,0,0,0.2)]"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none"
                     >
-                      <option value="en" className="bg-slate-900">Angielski</option>
-                      <option value="de" className="bg-slate-900">Niemiecki</option>
-                      <option value="es" className="bg-slate-900">Hiszpański</option>
-                    </select>
-                  </div>
-                  <div className="space-y-2 col-span-2">
-                    <label className="text-xs font-medium text-white/60">Poziom CEFR</label>
-                    <select 
-                      value={settings.cefrLevel}
-                      onChange={(e) => setSettings({...settings, cefrLevel: e.target.value as any})}
-                      className="w-full bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-3 outline-none shadow-[inset_0_2px_8px_rgba(0,0,0,0.2)]"
-                    >
-                      <option value="A1" className="bg-slate-900">A1 - Początkujący</option>
-                      <option value="A2" className="bg-slate-900">A2 - Podstawowy</option>
-                      <option value="B1" className="bg-slate-900">B1 - Średnio zaawansowany</option>
-                      <option value="B2" className="bg-slate-900">B2 - Ponad średnio zaawansowany</option>
-                      <option value="C1" className="bg-slate-900">C1 - Zaawansowany</option>
-                      <option value="C2" className="bg-slate-900">C2 - Biegły</option>
+                      <option value="en">Angielski</option>
+                      <option value="de">Niemiecki</option>
+                      <option value="es">Hiszpański</option>
                     </select>
                   </div>
                 </div>
@@ -705,22 +695,107 @@ export default function App() {
               <GlassCard className="p-6 space-y-6">
                 <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">Integracja Anki</h3>
                 
-                <div className="space-y-2">
-                  <label className="text-xs font-medium text-white/60">Adres URL AnkiConnect</label>
-                  <input 
-                    type="text"
-                    value={settings.ankiUrl}
-                    onChange={(e) => setSettings({...settings, ankiUrl: e.target.value})}
-                    placeholder="http://localhost:8080"
-                    className="w-full bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-3 outline-none focus:border-blue-500/50 text-sm shadow-[inset_0_2px_8px_rgba(0,0,0,0.2)]"
-                  />
-                  <p className="text-[10px] text-white/40">Domyślnie: http://localhost:8080 (Android) lub http://localhost:8765 (PC)</p>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-white/60">Adres URL AnkiConnect</label>
+                    <input 
+                      type="text"
+                      value={settings.ankiUrl}
+                      onChange={(e) => setSettings({...settings, ankiUrl: e.target.value})}
+                      placeholder="http://localhost:8765"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:border-blue-500/50 text-sm"
+                    />
+                    <p className="text-[10px] text-white/40">Domyślnie: http://localhost:8765 (PC) lub http://localhost:8080 (Android)</p>
+                  </div>
+
+                  {availableDecks.length > 0 && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-xs font-medium text-white/60">Wybierz talię (Deck)</label>
+                        <select 
+                          value={settings.ankiDeckName}
+                          onChange={(e) => setSettings({...settings, ankiDeckName: e.target.value})}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none text-sm"
+                        >
+                          {availableDecks.map(deck => (
+                            <option key={deck} value={deck}>{deck}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {availableFields.length > 0 && (
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-white/60">Kolumna słówek</label>
+                          <select 
+                            value={settings.ankiFieldName}
+                            onChange={(e) => setSettings({...settings, ankiFieldName: e.target.value})}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none text-sm"
+                          >
+                            {availableFields.map(field => (
+                              <option key={field} value={field}>{field}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {filteredWordsList.length > 0 && (
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-white/60">Podgląd słówek ({filteredWordsList.length})</label>
+                      <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto p-2 bg-black/20 rounded-xl border border-white/5">
+                        {filteredWordsList.slice(0, 50).map((w, i) => (
+                          <span key={i} className="text-[9px] px-1.5 py-0.5 bg-white/5 rounded-md text-white/60 border border-white/5">
+                            {w.word}
+                          </span>
+                        ))}
+                        {filteredWordsList.length > 50 && <span className="text-[9px] text-white/30">... i {filteredWordsList.length - 50} więcej</span>}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-white/60">Status słówek</label>
+                      <select 
+                        value={settings.ankiFilterStatus}
+                        onChange={(e) => setSettings({...settings, ankiFilterStatus: e.target.value as any})}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none text-sm"
+                      >
+                        <option value="all">Wszystkie</option>
+                        <option value="learned">Uczone (Learning+)</option>
+                        <option value="reviewed">Powtórzone (Review)</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-white/60">Ostatnio widziane (dni)</label>
+                      <input 
+                        type="range"
+                        min="1"
+                        max="365"
+                        value={settings.ankiFilterDays}
+                        onChange={(e) => setSettings({...settings, ankiFilterDays: parseInt(e.target.value)})}
+                        className="w-full accent-blue-500"
+                      />
+                      <div className="flex justify-between text-[10px] text-white/40">
+                        <span>1d</span>
+                        <span>{settings.ankiFilterDays}d</span>
+                        <span>365d</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <RefreshCw size={20} className={`text-blue-400 ${isSyncingAnki ? 'animate-spin' : ''}`} />
-                    <span className="font-medium">Synchronizacja Anki</span>
+                  <div className="flex flex-col">
+                    <div className="flex items-center gap-3">
+                      <RefreshCw size={20} className={`text-blue-400 ${isSyncingAnki ? 'animate-spin' : ''}`} />
+                      <span className="font-medium">Synchronizacja Anki</span>
+                    </div>
+                    {knownWords.length > 0 && (
+                      <span className="text-[10px] text-green-400 mt-1">
+                        Pobrano {knownWords.length} słów ({filteredWordsList.length} po filtrze)
+                      </span>
+                    )}
                   </div>
                   <button 
                     onClick={syncAnki}
@@ -731,7 +806,7 @@ export default function App() {
                   </button>
                 </div>
                 
-                <div className="bg-black/20 rounded-xl p-3 h-48 overflow-y-auto custom-scrollbar font-mono text-[10px] text-white/60 space-y-2 break-words shadow-[inset_0_2px_8px_rgba(0,0,0,0.2)] border border-white/5">
+                <div className="bg-black/20 rounded-xl p-3 h-32 overflow-y-auto custom-scrollbar font-mono text-[10px] text-white/60 space-y-2 break-words">
                   {ankiLogs.length === 0 ? (
                     <p className="italic text-white/40">Brak logów. Kliknij synchronizuj.</p>
                   ) : (
@@ -744,7 +819,10 @@ export default function App() {
                 </div>
 
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-white/60">Ogranicz AI do znanych słów</span>
+                  <div className="space-y-0.5">
+                    <span className="text-sm text-white/60 block">Ogranicz AI do znanych słów</span>
+                    <p className="text-[10px] text-white/40 italic">AI będzie budować zdania głównie z Twoich fiszek</p>
+                  </div>
                   <input 
                     type="checkbox" 
                     checked={settings.ankiLimitToKnown}
@@ -771,7 +849,7 @@ export default function App() {
                     value={settings.geminiApiKey}
                     onChange={(e) => setSettings({...settings, geminiApiKey: e.target.value})}
                     placeholder="Wprowadź klucz API..."
-                    className="w-full bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-4 outline-none focus:border-blue-500/50 shadow-[inset_0_2px_8px_rgba(0,0,0,0.2)]"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl p-4 outline-none focus:border-blue-500/50"
                   />
                 )}
               </GlassCard>
@@ -781,76 +859,6 @@ export default function App() {
       </main>
 
       <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
-
-      <AnimatePresence>
-        {isTheoryModalOpen && theoryData && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-md"
-            onClick={() => setIsTheoryModalOpen(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.95, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.95, y: 20 }}
-              onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-2xl max-h-[80vh] bg-white/10 backdrop-blur-3xl border border-white/20 rounded-3xl shadow-[0_8px_32px_0_rgba(0,0,0,0.5)] overflow-hidden flex flex-col"
-              style={{ boxShadow: "inset 0 1px 1px rgba(255, 255, 255, 0.2), 0 8px 32px rgba(0, 0, 0, 0.5)" }}
-            >
-              <div className="p-6 border-b border-white/10 flex items-center justify-between bg-white/5">
-                <h2 className="text-xl font-bold flex items-center gap-2">
-                  <BookOpen size={20} className="text-blue-400" />
-                  Teoria Gramatyczna
-                </h2>
-                <button 
-                  onClick={() => setIsTheoryModalOpen(false)}
-                  className="p-2 hover:bg-white/10 rounded-xl transition-colors"
-                >
-                  <Plus size={20} className="rotate-45 text-white/60" />
-                </button>
-              </div>
-              <div className="p-6 overflow-y-auto flex-1 space-y-4 custom-scrollbar">
-                {theoryData.map((chapter, idx) => (
-                  <TheoryChapter key={idx} chapter={chapter} />
-                ))}
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
-
-const TheoryChapter: React.FC<{ chapter: { title: string; content: string } }> = ({ chapter }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  return (
-    <div className="border border-white/10 rounded-xl overflow-hidden bg-white/5 backdrop-blur-xl shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)]">
-      <button 
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full p-4 flex items-center justify-between hover:bg-white/10 transition-colors text-left"
-      >
-        <h3 className="text-sm font-bold text-blue-300">{chapter.title}</h3>
-        <motion.div animate={{ rotate: isOpen ? 90 : 0 }}>
-          <ChevronRight size={18} className="text-white/40" />
-        </motion.div>
-      </button>
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden border-t border-white/10 bg-black/20"
-          >
-            <div className="p-4 prose prose-invert prose-sm max-w-none prose-p:leading-relaxed prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10">
-              <ReactMarkdown>{chapter.content}</ReactMarkdown>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-};
