@@ -1,5 +1,9 @@
 import { AnkiWord } from "../types";
 
+/**
+ * Service for interacting with AnkiConnectAndroid
+ * Zoptymalizowany pod kątem dynamicznego wyboru pól i filtrowania powtórek.
+ */
 export class AnkiService {
   private async request(url: string, action: string, params?: any): Promise<any> {
     try {
@@ -8,161 +12,132 @@ export class AnkiService {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, version: 6, params })
       });
-      
-      if (!response.ok) {
-        throw new Error(`[HTTP ${response.status}] Nie można nawiązać połączenia z serwerem AnkiConnect. Sprawdź czy adres ${url} jest poprawny.`);
-      }
-      
-      const data = await response.json();
 
-      // AnkiconnectAndroid potrafi zwrócić string "null" zamiast wartości null w polu error
-      if (data.error && data.error !== "null") {
-        throw new Error(`[Anki API Error] Akcja "${action}" zwróciła błąd: ${data.error}`);
+      if (!response.ok) {
+        throw new Error(`Błąd HTTP: ${response.status}`);
       }
+
+      const data = await response.json();
       
+      // Obsługa specyficznego błędu "null" w AnkiconnectAndroid
+      if (data.error && data.error !== "null") {
+        throw new Error(data.error);
+      }
+
       return data.result;
     } catch (e: any) {
-      if (e instanceof TypeError && e.message.includes('fetch')) {
-        throw new Error(`[Network Error] Brak dostępu do ${url}. Upewnij się, że: 
-          1. Ankiconnect Android ma włączony "Start Service".
-          2. Telefon i komputer są w tej samej sieci (jeśli nie używasz localhost).
-          3. Przeglądarka nie blokuje Mixed Content (HTTP na stronie HTTPS).`);
-      }
-      throw e;
+      throw new Error(`[Anki ${action}] ${e.message}`);
     }
   }
 
-  async checkConnection(url: string): Promise<boolean> {
-    try {
-      await this.request(url, 'version');
-      return true;
-    } catch (e: any) {
-      console.error("Connection check failed:", e.message);
-      throw new Error(`Błąd weryfikacji połączenia: ${e.message}`);
-    }
-  }
-
+  /**
+   * KROK 1: Pobiera listę talii
+   */
   async getDeckNames(url: string): Promise<string[]> {
-    try {
-      const result = await this.request(url, 'deckNames');
-      return result || [];
-    } catch (e: any) {
-      throw new Error(`Nie udało się pobrać listy talii: ${e.message}`);
-    }
+    const result = await this.request(url, 'deckNames');
+    return result || [];
   }
 
-  async getWordsFromDeck(url: string, deckName: string): Promise<AnkiWord[]> {
-    const chunkArray = (arr: any[], size: number) => {
-      const chunks = [];
-      for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
-      return chunks;
-    };
+  /**
+   * KROK 2: Podgląd struktury talii przed pobraniem całości.
+   * Zwraca nazwy pól (kolumn) oraz przykładowe wartości z pierwszej notatki.
+   */
+  async getDeckStructure(url: string, deckName: string): Promise<{ 
+    fields: string[], 
+    preview: Record<string, string>,
+    totalCards: number 
+  }> {
+    const query = `deck:"${deckName}"`;
+    const cardIds = await this.request(url, 'findCards', { query });
 
-    const query = `deck:'${deckName}'`;
-
-    // --- KROK 1: findCards ---
-    let cardIds: number[];
-    try {
-      cardIds = await this.request(url, 'findCards', { query });
-    } catch (e: any) {
-      console.warn("KROK 1 (findCards) nieudany, próbuję trybu kompatybilności (findNotes). Powód:", e.message);
-      return this.fallbackToNotes(url, query); 
+    if (!cardIds || cardIds.length === 0) {
+      throw new Error("Talia jest pusta.");
     }
 
+    // Pobieramy dane tylko dla PIERWSZEJ karty, aby poznać strukturę
+    const cardsData = await this.request(url, 'cardsInfo', { cards: [cardIds[0]] });
+    const firstCard = cardsData[0];
+    
+    const fields = Object.keys(firstCard.fields);
+    const preview: Record<string, string> = {};
+
+    fields.forEach(f => {
+      preview[f] = firstCard.fields[f].value.replace(/<[^>]*>/g, '').trim();
+    });
+
+    return {
+      fields,
+      preview,
+      totalCards: cardIds.length
+    };
+  }
+
+  /**
+   * KROK 3: Pobieranie słów z konkretnego pola z filtrowaniem.
+   * @param targetField Nazwa pola wybrana przez użytkownika (np. "Word")
+   * @param daysAgo Opcjonalnie: ile dni wstecz sprawdzano karty (np. 7 dni)
+   */
+  async getWordsFromDeck(
+    url: string, 
+    deckName: string, 
+    targetField: string,
+    daysAgo?: number
+  ): Promise<AnkiWord[]> {
+    // Budowanie zapytania: np. 'deck:"MojaTalia" rated:7'
+    let query = `deck:"${deckName}"`;
+    if (daysAgo) {
+      query += ` rated:${daysAgo}`;
+    }
+
+    const cardIds = await this.request(url, 'findCards', { query });
     if (!cardIds || cardIds.length === 0) return [];
 
-    // --- KROK 2: cardsInfo ---
-    let allCardsData: any[] = [];
-    const cardChunks = chunkArray(cardIds, 50); 
-    
-    try {
-      for (const [index, chunk] of cardChunks.entries()) {
-        const cardsData = await this.request(url, 'cardsInfo', { cards: chunk });
-        if (cardsData) {
-          allCardsData = allCardsData.concat(cardsData);
-        } else {
-          console.warn(`Paczka danych ${index + 1} zwróciła pusty wynik.`);
-        }
-      }
-    } catch (e: any) {
-      throw new Error(`Błąd podczas pobierania szczegółów kart (cardsInfo): ${e.message}`);
-    }
+    let allWords: AnkiWord[] = [];
+    // Chunking po 50, aby nie przepełnić bufora Androida
+    const chunks = this.chunkArray(cardIds, 50);
 
-    // --- KROK 3: Mapowanie danych ---
-    try {
-      return allCardsData.map((card: any) => this.mapCardToAnkiWord(card));
-    } catch (e: any) {
-      throw new Error(`Błąd przetwarzania danych z Anki (Mapowanie): ${e.message}`);
-    }
-  }
+    for (const chunk of chunks) {
+      const cardsData = await this.request(url, 'cardsInfo', { cards: chunk });
+      
+      const mapped = cardsData.map((card: any) => {
+        // Wyciągamy czysty tekst z wybranego pola
+        const rawContent = card.fields[targetField]?.value || "";
+        const cleanWord = rawContent.replace(/<[^>]*>/g, '').trim();
 
-  // Odseparowany fallback dla przejrzystości
-  private async fallbackToNotes(url: string, query: string): Promise<AnkiWord[]> {
-    let noteIds: number[];
-    try {
-      noteIds = await this.request(url, 'findNotes', { query });
-    } catch (e: any) {
-      throw new Error(`Tryb kompatybilności zawiódł. Nie można znaleźć notatek: ${e.message}`);
-    }
+        // Pełna mapa pól dla dodatkowego kontekstu (np. definicje)
+        const allFields: Record<string, string> = {};
+        Object.keys(card.fields).forEach(k => {
+          allFields[k] = card.fields[k].value.replace(/<[^>]*>/g, '').trim();
+        });
 
-    if (!noteIds || noteIds.length === 0) return [];
+        const statusMap: Record<number, AnkiWord['status']> = {
+          0: 'new',
+          1: 'learning',
+          2: 'review',
+          3: 'relearning'
+        };
 
-    let allNotesData: any[] = [];
-    try {
-      const noteChunks = this.chunkArray(noteIds, 50);
-      for (const chunk of noteChunks) {
-        const notesData = await this.request(url, 'notesInfo', { notes: chunk });
-        if (notesData) allNotesData = allNotesData.concat(notesData);
-      }
-    } catch (e: any) {
-      throw new Error(`Błąd w trybie kompatybilności (notesInfo): ${e.message}`);
-    }
-
-    return allNotesData.map((note: any) => this.mapNoteToAnkiWord(note));
-  }
-
-  // Helpery do mapowania, aby główna funkcja była czytelna
-  private mapCardToAnkiWord(card: any): AnkiWord {
-    const fields: Record<string, string> = {};
-    if (card.fields) {
-      Object.keys(card.fields).forEach(key => {
-        fields[key] = card.fields[key].value.replace(/<[^>]*>/g, '').trim();
+        return {
+          word: cleanWord,
+          fields: allFields,
+          interval: card.interval || 0,
+          reps: card.reps || 0,
+          status: statusMap[card.type] || 'new',
+          lastReview: card.mod ? card.mod * 1000 : undefined
+        };
       });
+
+      allWords = allWords.concat(mapped);
     }
 
-    const word = fields.Front || fields.Word || fields.Text || Object.values(fields)[0] || "Unknown";
-    const statusMap: Record<number, AnkiWord['status']> = { 0: 'new', 1: 'learning', 2: 'review', 3: 'relearning' };
-
-    return {
-      word,
-      fields,
-      interval: card.interval || 0,
-      reps: card.reps || 0,
-      status: statusMap[card.type] || 'new',
-      lastReview: card.mod ? card.mod * 1000 : undefined
-    };
-  }
-
-  private mapNoteToAnkiWord(note: any): AnkiWord {
-    const fields: Record<string, string> = {};
-    if (note.fields) {
-      Object.keys(note.fields).forEach(key => {
-        fields[key] = note.fields[key].value.replace(/<[^>]*>/g, '').trim();
-      });
-    }
-    return {
-      word: fields.Front || fields.Word || fields.Text || Object.values(fields)[0] || "Unknown",
-      fields,
-      interval: 0,
-      reps: 0,
-      status: 'review',
-      lastReview: Date.now()
-    };
+    return allWords;
   }
 
   private chunkArray(arr: any[], size: number) {
     const chunks = [];
-    for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+    for (let i = 0; i < arr.length; i += size) {
+      chunks.push(arr.slice(i, i + size));
+    }
     return chunks;
   }
 }
