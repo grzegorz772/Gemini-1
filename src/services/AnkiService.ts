@@ -1,8 +1,8 @@
 import { AnkiWord } from "../types";
 
 /**
- * Service for interacting with AnkiConnectAndroid
- * Zoptymalizowany pod kątem dynamicznego wyboru pól i filtrowania powtórek.
+ * Pełna usługa AnkiService z filtrowaniem czasu (rated:X) 
+ * oraz mechanicznym bezpiecznikiem chroniącym przed pobraniem całej talii.
  */
 export class AnkiService {
   private async request(url: string, action: string, params?: any): Promise<any> {
@@ -12,86 +12,61 @@ export class AnkiService {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, version: 6, params })
       });
-
-      if (!response.ok) {
-        throw new Error(`Błąd HTTP: ${response.status}`);
-      }
-
-      const data = await response.json();
       
-      // Obsługa specyficznego błędu "null" w AnkiconnectAndroid
-      if (data.error && data.error !== "null") {
-        throw new Error(data.error);
+      if (!response.ok) {
+        throw new Error(`[HTTP ${response.status}] Nie można połączyć z AnkiConnect.`);
       }
-
+      
+      const data = await response.json();
+      if (data.error && data.error !== "null") {
+        throw new Error(`[Anki API Error] ${data.error}`);
+      }
+      
       return data.result;
     } catch (e: any) {
-      throw new Error(`[Anki ${action}] ${e.message}`);
+      if (e instanceof TypeError && e.message.includes('fetch')) {
+        throw new Error(`Błąd sieci: Sprawdź czy AnkiConnect Android jest włączony na porcie 8765.`);
+      }
+      throw e;
     }
   }
 
-  /**
-   * Sprawdza połączenie z AnkiConnect
-   */
   async checkConnection(url: string): Promise<boolean> {
     try {
       await this.request(url, 'version');
       return true;
     } catch (e: any) {
-      throw new Error(`Błąd weryfikacji połączenia: ${e.message}`);
+      throw new Error(`Połączenie nieudane: ${e.message}`);
     }
   }
 
-  /**
-   * KROK 1: Pobiera listę talii
-   */
   async getDeckNames(url: string): Promise<string[]> {
     const result = await this.request(url, 'deckNames');
     return result || [];
   }
 
   /**
-   * KROK 2: Podgląd struktury talii przed pobraniem całości.
-   * Zwraca nazwy pól (kolumn) oraz przykładowe wartości z pierwszej notatki.
+   * Pobiera strukturę pól, aby użytkownik mógł wybrać 'targetField'.
    */
   async getDeckStructure(url: string, deckName: string): Promise<{ 
     fields: string[], 
     preview: Record<string, string>,
     totalCards: number 
   }> {
-    // Używamy standardowych podwójnych cudzysłowów dla Anki.
-    // Jeśli nazwa talii zawiera cudzysłowy, usuwamy je, aby uniknąć błędów parsowania.
     const safeDeckName = deckName.replace(/"/g, '');
     const query = `deck:"${safeDeckName}"`;
-    let cardIds: number[] = [];
-    let useNotesFallback = false;
-
-    try {
-      cardIds = await this.request(url, 'findCards', { query });
-    } catch (e: any) {
-      console.warn("findCards failed in getDeckStructure, falling back to findNotes", e);
-      useNotesFallback = true;
-      try {
-        cardIds = await this.request(url, 'findNotes', { query });
-      } catch (e2: any) {
-        throw new Error(`Nie udało się pobrać kart ani notatek. Błąd: ${e2.message}`);
-      }
-    }
+    
+    // Używamy findCards, bo chcemy ID kart do cardsInfo
+    const cardIds = await this.request(url, 'findCards', { query });
 
     if (!cardIds || cardIds.length === 0) {
-      throw new Error(`Talia "${deckName}" jest pusta lub zapytanie '${query}' nie zwróciło wyników.`);
+      throw new Error(`Talia "${deckName}" jest pusta.`);
     }
 
-    // Pobieramy dane tylko dla PIERWSZEJ karty, aby poznać strukturę
-    const infoAction = useNotesFallback ? 'notesInfo' : 'cardsInfo';
-    const infoParam = useNotesFallback ? { notes: [cardIds[0]] } : { cards: [cardIds[0]] };
-    
-    const cardsData = await this.request(url, infoAction, infoParam);
-    if (!cardsData || cardsData.length === 0) {
-       throw new Error("Nie udało się pobrać szczegółów karty/notatki.");
-    }
+    const cardsData = await this.request(url, 'cardsInfo', { cards: [cardIds[0]] });
+    if (!cardsData || cardsData.length === 0) throw new Error("Błąd pobierania danych karty.");
+
     const firstCard = cardsData[0];
-    
     const fields = Object.keys(firstCard.fields || {});
     const preview: Record<string, string> = {};
 
@@ -99,17 +74,12 @@ export class AnkiService {
       preview[f] = firstCard.fields[f].value.replace(/<[^>]*>/g, '').trim();
     });
 
-    return {
-      fields,
-      preview,
-      totalCards: cardIds.length
-    };
+    return { fields, preview, totalCards: cardIds.length };
   }
 
   /**
-   * KROK 3: Pobieranie słów z konkretnego pola z filtrowaniem.
-   * @param targetField Nazwa pola wybrana przez użytkownika (np. "Word")
-   * @param daysAgo Opcjonalnie: ile dni wstecz sprawdzano karty (np. 7 dni)
+   * Główna funkcja pobierająca słowa.
+   * STOSUJE PODWÓJNY FILTR: API (rated:X) oraz RĘCZNY (lastReview).
    */
   async getWordsFromDeck(
     url: string, 
@@ -117,74 +87,63 @@ export class AnkiService {
     targetField: string,
     daysAgo?: number
   ): Promise<AnkiWord[]> {
-    // Używamy standardowych podwójnych cudzysłowów dla Anki.
     const safeDeckName = deckName.replace(/"/g, '');
+    
+    // 1. Filtr na poziomie zapytania API
     let query = `deck:"${safeDeckName}"`;
-    if (daysAgo) {
+    if (daysAgo && daysAgo > 0) {
       query += ` rated:${daysAgo}`;
     }
 
-    let cardIds: number[] = [];
-    let useNotesFallback = false;
-
-    try {
-      cardIds = await this.request(url, 'findCards', { query });
-    } catch (e: any) {
-      console.warn("findCards failed in getWordsFromDeck, falling back to findNotes", e);
-      useNotesFallback = true;
-      // Jeśli używamy fallbacku, usuwamy 'rated:' bo findNotes może go nie wspierać tak samo
-      const fallbackQuery = `deck:"${safeDeckName}"`;
-      try {
-        cardIds = await this.request(url, 'findNotes', { query: fallbackQuery });
-      } catch (e2: any) {
-        throw new Error(`Nie udało się pobrać kart ani notatek. Błąd: ${e2.message}`);
-      }
-    }
-
+    // WAŻNE: Nie używamy findNotes, bo notatki nie obsługują filtra 'rated'
+    const cardIds = await this.request(url, 'findCards', { query });
+    
     if (!cardIds || cardIds.length === 0) return [];
 
     let allWords: AnkiWord[] = [];
-    // Chunking po 50, aby nie przepełnić bufora Androida
     const chunks = this.chunkArray(cardIds, 50);
-    const infoAction = useNotesFallback ? 'notesInfo' : 'cardsInfo';
 
     for (const chunk of chunks) {
-      const infoParam = useNotesFallback ? { notes: chunk } : { cards: chunk };
-      const cardsData = await this.request(url, infoAction, infoParam);
-      
+      const cardsData = await this.request(url, 'cardsInfo', { cards: chunk });
       if (!cardsData) continue;
 
       const mapped = cardsData.map((card: any) => {
-        // Wyciągamy czysty tekst z wybranego pola
+        // Mapowanie pól
         const rawContent = card.fields && card.fields[targetField] ? card.fields[targetField].value : "";
         const cleanWord = rawContent.replace(/<[^>]*>/g, '').trim();
 
-        // Pełna mapa pól dla dodatkowego kontekstu (np. definicje)
         const allFields: Record<string, string> = {};
-        if (card.fields) {
-          Object.keys(card.fields).forEach(k => {
-            allFields[k] = card.fields[k].value.replace(/<[^>]*>/g, '').trim();
-          });
-        }
+        Object.keys(card.fields).forEach(k => {
+          allFields[k] = card.fields[k].value.replace(/<[^>]*>/g, '').trim();
+        });
 
         const statusMap: Record<number, AnkiWord['status']> = {
-          0: 'new',
-          1: 'learning',
-          2: 'review',
-          3: 'relearning'
+          0: 'new', 1: 'learning', 2: 'review', 3: 'relearning'
         };
 
         return {
           word: cleanWord,
           fields: allFields,
-          interval: useNotesFallback ? 30 : (card.interval || 0),
-          reps: useNotesFallback ? 5 : (card.reps || 0),
-          status: useNotesFallback ? 'review' : (statusMap[card.type] || 'new'),
-          lastReview: useNotesFallback ? Date.now() : (card.mod ? card.mod * 1000 : undefined)
+          interval: card.interval || 0,
+          reps: card.reps || 0,
+          status: statusMap[card.type] || 'new',
+          // mod to czas modyfikacji w sekundach, zamieniamy na milisekundy
+          lastReview: card.mod ? card.mod * 1000 : 0 
         };
       });
 
       allWords = allWords.concat(mapped);
+    }
+
+    // 2. FILTR RĘCZNY (Client-side Backup)
+    // Jeśli API zignorowało rated:X i wysłało całą talię, wycinamy stare dane tutaj.
+    if (daysAgo && daysAgo > 0) {
+      const now = Date.now();
+      const cutoff = now - (daysAgo * 24 * 60 * 60 * 1000);
+
+      const filtered = allWords.filter(word => (word.lastReview || 0) >= cutoff);
+      console.log(`Pobrano ${allWords.length} kart, po filtrze zostało: ${filtered.length}`);
+      return filtered;
     }
 
     return allWords;
@@ -192,9 +151,7 @@ export class AnkiService {
 
   private chunkArray(arr: any[], size: number) {
     const chunks = [];
-    for (let i = 0; i < arr.length; i += size) {
-      chunks.push(arr.slice(i, i + size));
-    }
+    for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
     return chunks;
   }
 }
