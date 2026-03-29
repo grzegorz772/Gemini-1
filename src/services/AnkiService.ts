@@ -59,15 +59,28 @@ export class AnkiService {
     preview: Record<string, string>,
     totalCards: number 
   }> {
-    const query = `deck:"${deckName}"`;
-    const cardIds = await this.request(url, 'findCards', { query });
+    // Używamy pojedynczych cudzysłowów, aby uniknąć błędów parsowania (MalformedJsonException) w AnkiConnectAndroid
+    const query = `deck:'${deckName}'`;
+    let cardIds: number[] = [];
+    let useNotesFallback = false;
+
+    try {
+      cardIds = await this.request(url, 'findCards', { query });
+    } catch (e: any) {
+      console.warn("findCards failed in getDeckStructure, falling back to findNotes", e);
+      useNotesFallback = true;
+      cardIds = await this.request(url, 'findNotes', { query });
+    }
 
     if (!cardIds || cardIds.length === 0) {
       throw new Error("Talia jest pusta.");
     }
 
     // Pobieramy dane tylko dla PIERWSZEJ karty, aby poznać strukturę
-    const cardsData = await this.request(url, 'cardsInfo', { cards: [cardIds[0]] });
+    const infoAction = useNotesFallback ? 'notesInfo' : 'cardsInfo';
+    const infoParam = useNotesFallback ? { notes: [cardIds[0]] } : { cards: [cardIds[0]] };
+    
+    const cardsData = await this.request(url, infoAction, infoParam);
     const firstCard = cardsData[0];
     
     const fields = Object.keys(firstCard.fields);
@@ -95,21 +108,36 @@ export class AnkiService {
     targetField: string,
     daysAgo?: number
   ): Promise<AnkiWord[]> {
-    // Budowanie zapytania: np. 'deck:"MojaTalia" rated:7'
-    let query = `deck:"${deckName}"`;
+    // Budowanie zapytania: np. deck:'MojaTalia' rated:7
+    // Używamy pojedynczych cudzysłowów dla kompatybilności z AnkiConnectAndroid
+    let query = `deck:'${deckName}'`;
     if (daysAgo) {
       query += ` rated:${daysAgo}`;
     }
 
-    const cardIds = await this.request(url, 'findCards', { query });
+    let cardIds: number[] = [];
+    let useNotesFallback = false;
+
+    try {
+      cardIds = await this.request(url, 'findCards', { query });
+    } catch (e: any) {
+      console.warn("findCards failed in getWordsFromDeck, falling back to findNotes", e);
+      useNotesFallback = true;
+      // Jeśli używamy fallbacku, usuwamy 'rated:' bo findNotes może go nie wspierać tak samo
+      const fallbackQuery = `deck:'${deckName}'`;
+      cardIds = await this.request(url, 'findNotes', { query: fallbackQuery });
+    }
+
     if (!cardIds || cardIds.length === 0) return [];
 
     let allWords: AnkiWord[] = [];
     // Chunking po 50, aby nie przepełnić bufora Androida
     const chunks = this.chunkArray(cardIds, 50);
+    const infoAction = useNotesFallback ? 'notesInfo' : 'cardsInfo';
 
     for (const chunk of chunks) {
-      const cardsData = await this.request(url, 'cardsInfo', { cards: chunk });
+      const infoParam = useNotesFallback ? { notes: chunk } : { cards: chunk };
+      const cardsData = await this.request(url, infoAction, infoParam);
       
       const mapped = cardsData.map((card: any) => {
         // Wyciągamy czysty tekst z wybranego pola
@@ -132,10 +160,10 @@ export class AnkiService {
         return {
           word: cleanWord,
           fields: allFields,
-          interval: card.interval || 0,
-          reps: card.reps || 0,
-          status: statusMap[card.type] || 'new',
-          lastReview: card.mod ? card.mod * 1000 : undefined
+          interval: useNotesFallback ? 30 : (card.interval || 0),
+          reps: useNotesFallback ? 5 : (card.reps || 0),
+          status: useNotesFallback ? 'review' : (statusMap[card.type] || 'new'),
+          lastReview: useNotesFallback ? Date.now() : (card.mod ? card.mod * 1000 : undefined)
         };
       });
 
