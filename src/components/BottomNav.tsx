@@ -17,7 +17,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
 
   return (
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md z-50">
-      <div className="bg-white/5 backdrop-blur-3xl border border-white/10 rounded-[2.5rem] p-2 flex justify-around items-center shadow-[0_8px_32px_0_rgba(0,0,0,0.3)]" style={{ boxShadow: "inset 0 1px 1px rgba(255, 255, 255, 0.2), 0 8px 32px rgba(0, 0, 0, 0.3)" }}>
+      <div className="bg-black/40 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-2 flex justify-around items-center shadow-2xl">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -31,11 +31,11 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
               {isActive && (
                 <motion.div
                   layoutId="activeTab"
-                  className="absolute inset-0 bg-white/10 rounded-2xl shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)]"
+                  className="absolute inset-0 bg-white/10 rounded-2xl"
                   transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
                 />
               )}
-              <Icon
+              <Icon 
                 size={24}
                 className={`relative z-10 transition-colors duration-300 ${
                   isActive ? 'text-blue-400' : 'text-white/40 group-hover:text-white/70'
