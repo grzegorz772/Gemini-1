@@ -346,8 +346,14 @@ export default function App() {
             setSettings(prev => ({ ...prev, ankiFieldName: targetField }));
           }
 
-          addLog(`Pobieranie słów z deku: ${targetDeck} (kolumna: ${targetField})...`);
-          const words = await anki.current.getWordsFromDeck(settings.ankiUrl, targetDeck, targetField);
+          addLog(`Pobieranie słów z deku: ${targetDeck} (kolumna: ${targetField}, filtr: ${settings.ankiFilterStatus}, dni: ${settings.ankiFilterDays})...`);
+          const words = await anki.current.getWordsFromDeck(
+            settings.ankiUrl, 
+            targetDeck, 
+            targetField,
+            settings.ankiFilterDays,
+            settings.ankiFilterStatus
+          );
           setKnownWords(words);
           
           addLog(`Pobrano ${words.length} słów z deku ${targetDeck}.`);
