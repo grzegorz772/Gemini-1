@@ -59,8 +59,10 @@ export class AnkiService {
     preview: Record<string, string>,
     totalCards: number 
   }> {
-    // Używamy pojedynczych cudzysłowów, aby uniknąć błędów parsowania (MalformedJsonException) w AnkiConnectAndroid
-    const query = `deck:'${deckName}'`;
+    // Używamy standardowych podwójnych cudzysłowów dla Anki.
+    // Jeśli nazwa talii zawiera cudzysłowy, usuwamy je, aby uniknąć błędów parsowania.
+    const safeDeckName = deckName.replace(/"/g, '');
+    const query = `deck:"${safeDeckName}"`;
     let cardIds: number[] = [];
     let useNotesFallback = false;
 
@@ -69,11 +71,15 @@ export class AnkiService {
     } catch (e: any) {
       console.warn("findCards failed in getDeckStructure, falling back to findNotes", e);
       useNotesFallback = true;
-      cardIds = await this.request(url, 'findNotes', { query });
+      try {
+        cardIds = await this.request(url, 'findNotes', { query });
+      } catch (e2: any) {
+        throw new Error(`Nie udało się pobrać kart ani notatek. Błąd: ${e2.message}`);
+      }
     }
 
     if (!cardIds || cardIds.length === 0) {
-      throw new Error("Talia jest pusta.");
+      throw new Error(`Talia "${deckName}" jest pusta lub zapytanie '${query}' nie zwróciło wyników.`);
     }
 
     // Pobieramy dane tylko dla PIERWSZEJ karty, aby poznać strukturę
@@ -81,9 +87,12 @@ export class AnkiService {
     const infoParam = useNotesFallback ? { notes: [cardIds[0]] } : { cards: [cardIds[0]] };
     
     const cardsData = await this.request(url, infoAction, infoParam);
+    if (!cardsData || cardsData.length === 0) {
+       throw new Error("Nie udało się pobrać szczegółów karty/notatki.");
+    }
     const firstCard = cardsData[0];
     
-    const fields = Object.keys(firstCard.fields);
+    const fields = Object.keys(firstCard.fields || {});
     const preview: Record<string, string> = {};
 
     fields.forEach(f => {
@@ -108,9 +117,9 @@ export class AnkiService {
     targetField: string,
     daysAgo?: number
   ): Promise<AnkiWord[]> {
-    // Budowanie zapytania: np. deck:'MojaTalia' rated:7
-    // Używamy pojedynczych cudzysłowów dla kompatybilności z AnkiConnectAndroid
-    let query = `deck:'${deckName}'`;
+    // Używamy standardowych podwójnych cudzysłowów dla Anki.
+    const safeDeckName = deckName.replace(/"/g, '');
+    let query = `deck:"${safeDeckName}"`;
     if (daysAgo) {
       query += ` rated:${daysAgo}`;
     }
@@ -124,8 +133,12 @@ export class AnkiService {
       console.warn("findCards failed in getWordsFromDeck, falling back to findNotes", e);
       useNotesFallback = true;
       // Jeśli używamy fallbacku, usuwamy 'rated:' bo findNotes może go nie wspierać tak samo
-      const fallbackQuery = `deck:'${deckName}'`;
-      cardIds = await this.request(url, 'findNotes', { query: fallbackQuery });
+      const fallbackQuery = `deck:"${safeDeckName}"`;
+      try {
+        cardIds = await this.request(url, 'findNotes', { query: fallbackQuery });
+      } catch (e2: any) {
+        throw new Error(`Nie udało się pobrać kart ani notatek. Błąd: ${e2.message}`);
+      }
     }
 
     if (!cardIds || cardIds.length === 0) return [];
@@ -139,16 +152,20 @@ export class AnkiService {
       const infoParam = useNotesFallback ? { notes: chunk } : { cards: chunk };
       const cardsData = await this.request(url, infoAction, infoParam);
       
+      if (!cardsData) continue;
+
       const mapped = cardsData.map((card: any) => {
         // Wyciągamy czysty tekst z wybranego pola
-        const rawContent = card.fields[targetField]?.value || "";
+        const rawContent = card.fields && card.fields[targetField] ? card.fields[targetField].value : "";
         const cleanWord = rawContent.replace(/<[^>]*>/g, '').trim();
 
         // Pełna mapa pól dla dodatkowego kontekstu (np. definicje)
         const allFields: Record<string, string> = {};
-        Object.keys(card.fields).forEach(k => {
-          allFields[k] = card.fields[k].value.replace(/<[^>]*>/g, '').trim();
-        });
+        if (card.fields) {
+          Object.keys(card.fields).forEach(k => {
+            allFields[k] = card.fields[k].value.replace(/<[^>]*>/g, '').trim();
+          });
+        }
 
         const statusMap: Record<number, AnkiWord['status']> = {
           0: 'new',
