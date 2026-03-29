@@ -336,17 +336,19 @@ export default function App() {
         
         const targetDeck = settings.ankiDeckName || decks[0];
         if (targetDeck) {
-          addLog(`Pobieranie słów z deku: ${targetDeck}...`);
-          const words = await anki.current.getWordsFromDeck(settings.ankiUrl, targetDeck);
-          setKnownWords(words);
+          addLog(`Pobieranie struktury deku: ${targetDeck}...`);
+          const structure = await anki.current.getDeckStructure(settings.ankiUrl, targetDeck);
+          setAvailableFields(structure.fields);
           
-          if (words.length > 0) {
-            const fields = Object.keys(words[0].fields);
-            setAvailableFields(fields);
-            if (!settings.ankiFieldName || !fields.includes(settings.ankiFieldName)) {
-              setSettings(prev => ({ ...prev, ankiFieldName: fields[0] }));
-            }
+          let targetField = settings.ankiFieldName;
+          if (!targetField || !structure.fields.includes(targetField)) {
+            targetField = structure.fields[0];
+            setSettings(prev => ({ ...prev, ankiFieldName: targetField }));
           }
+
+          addLog(`Pobieranie słów z deku: ${targetDeck} (kolumna: ${targetField})...`);
+          const words = await anki.current.getWordsFromDeck(settings.ankiUrl, targetDeck, targetField);
+          setKnownWords(words);
           
           addLog(`Pobrano ${words.length} słów z deku ${targetDeck}.`);
           if (!settings.ankiDeckName) {

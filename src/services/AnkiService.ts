@@ -31,6 +31,18 @@ export class AnkiService {
   }
 
   /**
+   * Sprawdza połączenie z AnkiConnect
+   */
+  async checkConnection(url: string): Promise<boolean> {
+    try {
+      await this.request(url, 'version');
+      return true;
+    } catch (e: any) {
+      throw new Error(`Błąd weryfikacji połączenia: ${e.message}`);
+    }
+  }
+
+  /**
    * KROK 1: Pobiera listę talii
    */
   async getDeckNames(url: string): Promise<string[]> {
