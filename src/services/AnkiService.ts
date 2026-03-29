@@ -19,7 +19,6 @@ export class AnkiService {
 
       const data = await response.json();
       
-      // Obsługa specyficznego błędu "null" w AnkiconnectAndroid
       if (data.error && data.error !== "null") {
         throw new Error(data.error);
       }
@@ -30,9 +29,6 @@ export class AnkiService {
     }
   }
 
-  /**
-   * Sprawdza połączenie z AnkiConnect
-   */
   async checkConnection(url: string): Promise<boolean> {
     try {
       await this.request(url, 'version');
@@ -42,25 +38,16 @@ export class AnkiService {
     }
   }
 
-  /**
-   * KROK 1: Pobiera listę talii
-   */
   async getDeckNames(url: string): Promise<string[]> {
     const result = await this.request(url, 'deckNames');
     return result || [];
   }
 
-  /**
-   * KROK 2: Podgląd struktury talii przed pobraniem całości.
-   * Zwraca nazwy pól (kolumn) oraz przykładowe wartości z pierwszej notatki.
-   */
   async getDeckStructure(url: string, deckName: string): Promise<{ 
     fields: string[], 
     preview: Record<string, string>,
     totalCards: number 
   }> {
-    // Używamy standardowych podwójnych cudzysłowów dla Anki.
-    // Jeśli nazwa talii zawiera cudzysłowy, usuwamy je, aby uniknąć błędów parsowania.
     const safeDeckName = deckName.replace(/"/g, '');
     const query = `deck:"${safeDeckName}"`;
     let cardIds: number[] = [];
@@ -82,7 +69,6 @@ export class AnkiService {
       throw new Error(`Talia "${deckName}" jest pusta lub zapytanie '${query}' nie zwróciło wyników.`);
     }
 
-    // Pobieramy dane tylko dla PIERWSZEJ karty, aby poznać strukturę
     const infoAction = useNotesFallback ? 'notesInfo' : 'cardsInfo';
     const infoParam = useNotesFallback ? { notes: [cardIds[0]] } : { cards: [cardIds[0]] };
     
@@ -94,7 +80,6 @@ export class AnkiService {
     
     const fields = Object.keys(firstCard.fields || {});
     const preview: Record<string, string> = {};
-
     fields.forEach(f => {
       preview[f] = firstCard.fields[f].value.replace(/<[^>]*>/g, '').trim();
     });
@@ -106,12 +91,6 @@ export class AnkiService {
     };
   }
 
-  /**
-   * KROK 3: Pobieranie słów z konkretnego pola z filtrowaniem.
-   * @param targetField Nazwa pola wybrana przez użytkownika (np. "Word")
-   * @param daysAgo Opcjonalnie: ile dni wstecz sprawdzano karty (np. 7 dni)
-   * @param filterStatus Opcjonalnie: status kart ('all', 'learned', 'reviewed')
-   */
   async getWordsFromDeck(
     url: string, 
     deckName: string, 
@@ -119,33 +98,20 @@ export class AnkiService {
     daysAgo?: number,
     filterStatus: string = 'all'
   ): Promise<AnkiWord[]> {
-    // Używamy standardowych podwójnych cudzysłowów dla Anki.
     const safeDeckName = deckName.replace(/"/g, '');
-    let query = `deck:"${safeDeckName}"`;
-    
-    // Dodajemy filtr statusu do zapytania
-    if (filterStatus === 'learned') {
-      query += ' -is:new'; // Tylko te, które nie są nowe (czyli nauczone/w trakcie)
-    } else if (filterStatus === 'reviewed') {
-      query += ' is:review'; // Tylko te w fazie powtórek
-    }
-
-    if (daysAgo && daysAgo > 0) {
-      query += ` rated:${daysAgo}`;
-    }
+    const query = `deck:"${safeDeckName}"`;
 
     let cardIds: number[] = [];
     let useNotesFallback = false;
 
+    // Pobranie wszystkich kart lub notatek
     try {
       cardIds = await this.request(url, 'findCards', { query });
     } catch (e: any) {
       console.warn("findCards failed in getWordsFromDeck, falling back to findNotes", e);
       useNotesFallback = true;
-      // Jeśli używamy fallbacku, usuwamy 'rated:' bo findNotes może go nie wspierać tak samo
-      const fallbackQuery = `deck:"${safeDeckName}"`;
       try {
-        cardIds = await this.request(url, 'findNotes', { query: fallbackQuery });
+        cardIds = await this.request(url, 'findNotes', { query });
       } catch (e2: any) {
         throw new Error(`Nie udało się pobrać kart ani notatek. Błąd: ${e2.message}`);
       }
@@ -153,36 +119,33 @@ export class AnkiService {
 
     if (!cardIds || cardIds.length === 0) return [];
 
-    let allWords: AnkiWord[] = [];
-    // Chunking po 50, aby nie przepełnić bufora Androida
     const chunks = this.chunkArray(cardIds, 50);
     const infoAction = useNotesFallback ? 'notesInfo' : 'cardsInfo';
+
+    let allWords: AnkiWord[] = [];
 
     for (const chunk of chunks) {
       const infoParam = useNotesFallback ? { notes: chunk } : { cards: chunk };
       const cardsData = await this.request(url, infoAction, infoParam);
-      
       if (!cardsData) continue;
 
+      const statusMap: Record<number, AnkiWord['status']> = {
+        0: 'new',
+        1: 'learning',
+        2: 'review',
+        3: 'relearning'
+      };
+
       const mapped = cardsData.map((card: any) => {
-        // Wyciągamy czysty tekst z wybranego pola
         const rawContent = card.fields && card.fields[targetField] ? card.fields[targetField].value : "";
         const cleanWord = rawContent.replace(/<[^>]*>/g, '').trim();
 
-        // Pełna mapa pól dla dodatkowego kontekstu (np. definicje)
         const allFields: Record<string, string> = {};
         if (card.fields) {
           Object.keys(card.fields).forEach(k => {
             allFields[k] = card.fields[k].value.replace(/<[^>]*>/g, '').trim();
           });
         }
-
-        const statusMap: Record<number, AnkiWord['status']> = {
-          0: 'new',
-          1: 'learning',
-          2: 'review',
-          3: 'relearning'
-        };
 
         return {
           word: cleanWord,
@@ -194,7 +157,23 @@ export class AnkiService {
         };
       });
 
-      allWords = allWords.concat(mapped);
+      // Filtrowanie po stronie JS
+      const filtered = mapped.filter(w => {
+        if (filterStatus === 'all') return true;
+        if (filterStatus === 'learned') return w.status === 'review' || w.status === 'learning';
+        if (filterStatus === 'reviewed') return w.status === 'review';
+        return true;
+      });
+
+      // Filtrowanie po daysAgo
+      const now = Date.now();
+      const finalFiltered = filtered.filter(w => {
+        if (!daysAgo || !w.lastReview) return true;
+        const diffDays = (now - w.lastReview) / (1000 * 60 * 60 * 24);
+        return diffDays <= daysAgo;
+      });
+
+      allWords = allWords.concat(finalFiltered);
     }
 
     return allWords;
