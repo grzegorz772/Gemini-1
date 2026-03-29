@@ -99,83 +99,137 @@ export class AnkiService {
     filterStatus: string = 'all'
   ): Promise<AnkiWord[]> {
     const safeDeckName = deckName.replace(/"/g, '');
-    const query = `deck:"${safeDeckName}"`;
+    
+    // Budujemy zapytanie tak, aby Anki od razu przefiltrowało ID kart.
+    let query = `deck:"${safeDeckName}"`;
+    
+    // Dodajemy filtry statusu do zapytania
+    if (filterStatus === 'learned') {
+      query += ' -is:new';
+    } else if (filterStatus === 'reviewed') {
+      query += ' is:review';
+    }
+
+    // Dodajemy filtr czasu do zapytania
+    if (daysAgo && daysAgo > 0) {
+      query += ` rated:${daysAgo}`;
+    }
+
+    console.log(`[AnkiService] Próba zapytania findCards: ${query}`);
 
     let cardIds: number[] = [];
-    let useNotesFallback = false;
-
-    // Pobranie wszystkich kart lub notatek
+    
     try {
+      // Próbujemy pobrać przefiltrowane ID kart
       cardIds = await this.request(url, 'findCards', { query });
+      console.log(`[AnkiService] findCards zwróciło ${cardIds.length} ID.`);
+      
+      // Jeśli zapytanie z filtrami zwróciło 0, a mamy filtry, to może filtr jest zbyt restrykcyjny 
+      // lub API go nie rozumie. Ale jeśli zwróciło > 0, to super.
     } catch (e: any) {
-      console.warn("findCards failed in getWordsFromDeck, falling back to findNotes", e);
-      useNotesFallback = true;
+      console.warn(`[AnkiService] findCards z filtrami nie powiodło się: ${e.message}. Próba fallbacku.`);
+      // Fallback: pobieramy wszystko z deku i przefiltrujemy w JS
+      const basicQuery = `deck:"${safeDeckName}"`;
       try {
-        cardIds = await this.request(url, 'findNotes', { query });
+        cardIds = await this.request(url, 'findCards', { query: basicQuery });
+        console.log(`[AnkiService] Fallback findCards (wszystkie): ${cardIds.length} ID.`);
       } catch (e2: any) {
-        throw new Error(`Nie udało się pobrać kart ani notatek. Błąd: ${e2.message}`);
+        console.error(`[AnkiService] Fallback findCards również zawiódł: ${e2.message}`);
+        return [];
       }
     }
 
-    if (!cardIds || cardIds.length === 0) return [];
-
-    const chunks = this.chunkArray(cardIds, 50);
-    const infoAction = useNotesFallback ? 'notesInfo' : 'cardsInfo';
-
-    let allWords: AnkiWord[] = [];
-
-    for (const chunk of chunks) {
-      const infoParam = useNotesFallback ? { notes: chunk } : { cards: chunk };
-      const cardsData = await this.request(url, infoAction, infoParam);
-      if (!cardsData) continue;
-
-      const statusMap: Record<number, AnkiWord['status']> = {
-        0: 'new',
-        1: 'learning',
-        2: 'review',
-        3: 'relearning'
-      };
-
-      const mapped = cardsData.map((card: any) => {
-        const rawContent = card.fields && card.fields[targetField] ? card.fields[targetField].value : "";
-        const cleanWord = rawContent.replace(/<[^>]*>/g, '').trim();
-
-        const allFields: Record<string, string> = {};
-        if (card.fields) {
-          Object.keys(card.fields).forEach(k => {
-            allFields[k] = card.fields[k].value.replace(/<[^>]*>/g, '').trim();
-          });
-        }
-
-        return {
-          word: cleanWord,
-          fields: allFields,
-          interval: useNotesFallback ? 30 : (card.interval || 0),
-          reps: useNotesFallback ? 5 : (card.reps || 0),
-          status: useNotesFallback ? 'review' : (statusMap[card.type] || 'new'),
-          lastReview: useNotesFallback ? Date.now() : (card.mod ? card.mod * 1000 : undefined)
-        };
-      });
-
-      // Filtrowanie po stronie JS
-      const filtered = mapped.filter(w => {
-        if (filterStatus === 'all') return true;
-        if (filterStatus === 'learned') return w.status === 'review' || w.status === 'learning';
-        if (filterStatus === 'reviewed') return w.status === 'review';
-        return true;
-      });
-
-      // Filtrowanie po daysAgo
-      const now = Date.now();
-      const finalFiltered = filtered.filter(w => {
-        if (!daysAgo || !w.lastReview) return true;
-        const diffDays = (now - w.lastReview) / (1000 * 60 * 60 * 24);
-        return diffDays <= daysAgo;
-      });
-
-      allWords = allWords.concat(finalFiltered);
+    if (!cardIds || cardIds.length === 0) {
+      console.log("[AnkiService] Brak kart spełniających kryteria (ID = 0).");
+      return [];
     }
 
+    // Jeśli mamy bardzo dużo kart (np. > 2000), a filtr API nie zadziałał (fallback), 
+    // to pobieranie wszystkiego będzie trwało wieki.
+    if (cardIds.length > 2000) {
+      console.warn(`[AnkiService] Wykryto bardzo dużą liczbę kart (${cardIds.length}). Ograniczam do pierwszych 2000.`);
+      cardIds = cardIds.slice(0, 2000);
+    }
+
+    // Jeśli mamy bardzo dużo kart, dzielimy na mniejsze paczki
+    const chunks = this.chunkArray(cardIds, 50);
+    let allWords: AnkiWord[] = [];
+    const now = Date.now();
+
+    console.log(`[AnkiService] Rozpoczynam pobieranie cardsInfo dla ${cardIds.length} kart w ${chunks.length} paczkach.`);
+
+    for (const chunk of chunks) {
+      try {
+        const cardsData = await this.request(url, 'cardsInfo', { cards: chunk });
+        if (!cardsData) continue;
+
+        const statusMap: Record<number, AnkiWord['status']> = {
+          0: 'new',
+          1: 'learning',
+          2: 'review',
+          3: 'relearning'
+        };
+
+        const mapped = cardsData.map((card: any) => {
+          const rawContent = card.fields && card.fields[targetField] ? card.fields[targetField].value : "";
+          const cleanWord = rawContent.replace(/<[^>]*>/g, '').trim();
+
+          const allFields: Record<string, string> = {};
+          if (card.fields) {
+            Object.keys(card.fields).forEach(k => {
+              allFields[k] = card.fields[k].value.replace(/<[^>]*>/g, '').trim();
+            });
+          }
+
+          // card.mod to czas modyfikacji (sekundy), często zbieżny z ostatnią powtórką
+          const lastReviewTime = card.mod ? card.mod * 1000 : 0;
+
+          return {
+            word: cleanWord,
+            fields: allFields,
+            interval: card.interval || 0,
+            reps: card.reps || 0,
+            status: statusMap[card.type] || 'new',
+            lastReview: lastReviewTime
+          };
+        });
+
+        // FILTROWANIE PO STRONIE KLIENTA (zawsze robimy dla pewności i jako fallback)
+        const filtered = mapped.filter((w: AnkiWord) => {
+          // 1. Filtr statusu
+          if (filterStatus === 'learned') {
+            if (w.status === 'new') return false;
+          } else if (filterStatus === 'reviewed') {
+            if (w.status !== 'review') return false;
+          }
+
+          // 2. Filtr czasu (daysAgo)
+          // Jeśli API przefiltrowało poprawnie, to ten warunek i tak przejdzie.
+          // Jeśli API zawiodło i mamy fallback, to filtrujemy po modyfikacji (mod).
+          if (daysAgo && daysAgo > 0) {
+            if (!w.lastReview) return false;
+            const diffDays = (now - w.lastReview) / (1000 * 60 * 60 * 24);
+            if (diffDays > daysAgo) return false;
+          }
+
+          return true;
+        });
+
+        allWords = allWords.concat(filtered);
+        
+        // Jeśli pobraliśmy już wystarczająco dużo (np. 1000), a deck jest gigantyczny, 
+        // to przerywamy, żeby nie blokować UI na wieki.
+        if (allWords.length >= 1000) {
+          console.log("[AnkiService] Osiągnięto limit 1000 przefiltrowanych słów, kończę.");
+          break;
+        }
+      } catch (chunkErr: any) {
+        console.error(`[AnkiService] Błąd podczas pobierania paczki kart: ${chunkErr.message}`);
+        continue;
+      }
+    }
+
+    console.log(`[AnkiService] Finalnie pobrano i przefiltrowano: ${allWords.length} słów.`);
     return allWords;
   }
 
