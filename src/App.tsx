@@ -169,6 +169,31 @@ export default function App() {
   const [availableDecks, setAvailableDecks] = useState<string[]>([]);
   const [availableFields, setAvailableFields] = useState<string[]>([]);
 
+  const [customCode, setCustomCode] = useState(`// Przykładowy skrypt testowy AnkiConnect
+const response = await fetch('http://localhost:8765', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    action: 'deckNames',
+    version: 6
+  })
+});
+const data = await response.json();
+return data;`);
+  const [customCodeOutput, setCustomCodeOutput] = useState('');
+
+  const runCustomCode = async () => {
+    try {
+      setCustomCodeOutput('Uruchamianie...');
+      const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+      const fn = new AsyncFunction(customCode);
+      const result = await fn();
+      setCustomCodeOutput(typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result));
+    } catch (err) {
+      setCustomCodeOutput(err instanceof Error ? err.toString() : String(err));
+    }
+  };
+
   const getFilteredWords = () => {
     if (!knownWords.length) return [];
     
@@ -954,6 +979,34 @@ export default function App() {
                     className="w-full bg-white/5 border border-white/10 rounded-xl p-4 outline-none focus:border-blue-500/50"
                   />
                 )}
+              </GlassCard>
+
+              <GlassCard className="p-6 space-y-6">
+                <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">Testowanie Skryptów (AnkiConnect)</h3>
+                <div className="space-y-4">
+                  <p className="text-xs text-white/60">
+                    Napisz własny skrypt JavaScript, aby przetestować połączenie z Anki lub inne funkcje. Kod jest uruchamiany w kontekście asynchronicznym (możesz używać <code>await</code>).
+                  </p>
+                  <textarea
+                    value={customCode}
+                    onChange={(e) => setCustomCode(e.target.value)}
+                    className="w-full h-48 bg-black/40 border border-white/10 rounded-xl p-4 font-mono text-xs text-green-400 focus:outline-none focus:border-blue-500/50 transition-all resize-y"
+                    spellCheck={false}
+                  />
+                  <div className="flex justify-end">
+                    <GlassButton onClick={runCustomCode} className="px-6 py-2 text-xs">
+                      Uruchom kod
+                    </GlassButton>
+                  </div>
+                  {customCodeOutput && (
+                    <div className="space-y-2">
+                      <span className="text-xs font-bold text-white/40 uppercase tracking-widest">Wynik:</span>
+                      <pre className="w-full max-h-64 overflow-y-auto bg-black/40 border border-white/10 rounded-xl p-4 font-mono text-[10px] text-white/80 whitespace-pre-wrap break-words custom-scrollbar">
+                        {customCodeOutput}
+                      </pre>
+                    </div>
+                  )}
+                </div>
               </GlassCard>
             </motion.div>
           )}
