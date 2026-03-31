@@ -169,7 +169,9 @@ export default function App() {
   const [availableDecks, setAvailableDecks] = useState<string[]>([]);
   const [availableFields, setAvailableFields] = useState<string[]>([]);
 
-  const [customCode, setCustomCode] = useState(`// Przykładowy skrypt testowy AnkiConnect
+  const [customCode, setCustomCode] = useState(`// Możesz używać: ankiData, settings, knownWords
+// Przykład: return ankiData ? Object.keys(ankiData.decks) : 'Brak danych APKG';
+
 const response = await fetch('http://localhost:8765', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
@@ -179,15 +181,15 @@ const response = await fetch('http://localhost:8765', {
   })
 });
 const data = await response.json();
-return data;`);
+return { ankiConnect: data, localKnownWords: knownWords.length };`);
   const [customCodeOutput, setCustomCodeOutput] = useState('');
 
   const runCustomCode = async () => {
     try {
       setCustomCodeOutput('Uruchamianie...');
       const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
-      const fn = new AsyncFunction(customCode);
-      const result = await fn();
+      const fn = new AsyncFunction('ankiData', 'settings', 'knownWords', customCode);
+      const result = await fn(ankiApkgData, settings, knownWords);
       setCustomCodeOutput(typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result));
     } catch (err) {
       setCustomCodeOutput(err instanceof Error ? err.toString() : String(err));
@@ -960,33 +962,33 @@ return data;`);
               </GlassCard>
 
               <GlassCard className="p-6 space-y-6">
-                <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">API Gemini</h3>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-white/60">Użyj klucza AI Studio (Testy)</span>
-                  <input 
-                    type="checkbox" 
-                    checked={settings.useStudioKey}
-                    onChange={(e) => setSettings({...settings, useStudioKey: e.target.checked})}
-                    className="w-5 h-5 accent-blue-500"
-                  />
-                </div>
-                {!settings.useStudioKey && (
-                  <input
-                    type="password"
-                    value={settings.geminiApiKey}
-                    onChange={(e) => setSettings({...settings, geminiApiKey: e.target.value})}
-                    placeholder="Wprowadź klucz API..."
-                    className="w-full bg-white/5 border border-white/10 rounded-xl p-4 outline-none focus:border-blue-500/50"
-                  />
-                )}
-              </GlassCard>
-
-              <GlassCard className="p-6 space-y-6">
-                <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">Testowanie Skryptów (AnkiConnect)</h3>
+                <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">Testowanie Skryptów (AnkiConnect / APKG)</h3>
                 <div className="space-y-4">
                   <p className="text-xs text-white/60">
-                    Napisz własny skrypt JavaScript, aby przetestować połączenie z Anki lub inne funkcje. Kod jest uruchamiany w kontekście asynchronicznym (możesz używać <code>await</code>).
+                    Napisz własny skrypt JavaScript. Masz dostęp do <code>ankiData</code> (z pliku .apkg), <code>settings</code> oraz <code>knownWords</code>.
                   </p>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => setCustomCode(`// Pobierz nazwy deków z pliku APKG
+if (!ankiData) return 'Najpierw załaduj plik .apkg!';
+return Object.values(ankiData.decks).map(d => d.name);`)}
+                      className="text-[10px] px-2 py-1 bg-white/5 rounded border border-white/10 hover:bg-white/10"
+                    >
+                      Przykład APKG
+                    </button>
+                    <button 
+                      onClick={() => setCustomCode(`// Sprawdź połączenie z AnkiConnect
+const response = await fetch('http://localhost:8765', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ action: 'version', version: 6 })
+});
+return await response.json();`)}
+                      className="text-[10px] px-2 py-1 bg-white/5 rounded border border-white/10 hover:bg-white/10"
+                    >
+                      Przykład AnkiConnect
+                    </button>
+                  </div>
                   <textarea
                     value={customCode}
                     onChange={(e) => setCustomCode(e.target.value)}
@@ -1007,6 +1009,28 @@ return data;`);
                     </div>
                   )}
                 </div>
+              </GlassCard>
+
+              <GlassCard className="p-6 space-y-6">
+                <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">API Gemini</h3>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-white/60">Użyj klucza AI Studio (Testy)</span>
+                  <input 
+                    type="checkbox" 
+                    checked={settings.useStudioKey}
+                    onChange={(e) => setSettings({...settings, useStudioKey: e.target.checked})}
+                    className="w-5 h-5 accent-blue-500"
+                  />
+                </div>
+                {!settings.useStudioKey && (
+                  <input
+                    type="password"
+                    value={settings.geminiApiKey}
+                    onChange={(e) => setSettings({...settings, geminiApiKey: e.target.value})}
+                    placeholder="Wprowadź klucz API..."
+                    className="w-full bg-white/5 border border-white/10 rounded-xl p-4 outline-none focus:border-blue-500/50"
+                  />
+                )}
               </GlassCard>
             </motion.div>
           )}

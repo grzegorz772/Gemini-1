@@ -10,7 +10,9 @@ export class AnkiService {
 
   private async getSql() {
     if (!this.sqlPromise) {
+      console.log("[AnkiService] Inicjalizacja silnika SQL z CDN...");
       this.sqlPromise = initSqlJs({
+        // Użycie CDN rozwiązuje błąd "expected magic word", jeśli lokalny serwer zwraca HTML zamiast WASM
         locateFile: file => `https://sql.js.org/dist/${file}`
       });
     }
@@ -207,21 +209,42 @@ export class AnkiService {
     models: Record<string, { id: string, name: string, flds: {name: string}[] }>,
     db: any
   }> {
-    const zip = await JSZip.loadAsync(file);
-    const dbFile = zip.file("collection.anki21") || zip.file("collection.anki2");
-    if (!dbFile) throw new Error("Nie znaleziono bazy danych w pliku .apkg");
+    console.group(`[AnkiService] Import .apkg: ${file.name}`);
+    try {
+      const zip = await JSZip.loadAsync(file);
+      console.log("1. ZIP załadowany pomyślnie.");
 
-    const dbData = await dbFile.async("uint8array");
-    const SQL = await this.getSql();
-    const db = new SQL.Database(dbData);
+      const dbFile = zip.file("collection.anki21") || zip.file("collection.anki2");
+      if (!dbFile) {
+        console.error("Błąd: brak pliku bazy danych w ZIP.");
+        throw new Error("Nie znaleziono bazy danych w pliku .apkg");
+      }
+      console.log(`2. Znaleziono bazę: ${dbFile.name}`);
 
-    const colResult = db.exec("SELECT models, decks FROM col");
-    if (colResult.length === 0) throw new Error("Błąd odczytu tabeli col");
+      const dbData = await dbFile.async("uint8array");
+      console.log(`3. Dane binarne gotowe (${dbData.length} bajtów).`);
 
-    const models = JSON.parse(colResult[0].values[0][0] as string);
-    const decks = JSON.parse(colResult[0].values[0][1] as string);
+      const SQL = await this.getSql();
+      console.log("4. Silnik SQL zainicjowany.");
 
-    return { decks, models, db };
+      const db = new SQL.Database(dbData);
+      console.log("5. Baza danych otwarta.");
+
+      const colResult = db.exec("SELECT models, decks FROM col");
+      if (colResult.length === 0) throw new Error("Błąd odczytu tabeli col");
+
+      const models = JSON.parse(colResult[0].values[0][0] as string);
+      const decks = JSON.parse(colResult[0].values[0][1] as string);
+      
+      console.log(`6. Sukces: załadowano ${Object.keys(decks).length} talii.`);
+      console.groupEnd();
+
+      return { decks, models, db };
+    } catch (err: any) {
+      console.error("BŁĄD PARSOWANIA APKG:", err);
+      console.groupEnd();
+      throw err;
+    }
   }
 
   async getWordsFromDb(
