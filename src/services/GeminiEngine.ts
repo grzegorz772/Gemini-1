@@ -1,12 +1,32 @@
 import { GoogleGenAI } from "@google/genai";
 import { UserSettings, Message } from "../types";
 
+export interface TokenUsage {
+  totalTokens: number;
+  lastRequest: any;
+  history: { tokens: number; timestamp: number }[];
+}
+
 export class GeminiEngine {
   private ai: GoogleGenAI;
-  private model: string = "gemini-3-flash-preview";
+  public usage: TokenUsage = {
+    totalTokens: 0,
+    lastRequest: null,
+    history: []
+  };
 
   constructor(apiKey: string) {
     this.ai = new GoogleGenAI({ apiKey });
+  }
+
+  private trackUsage(tokens: number, request: any) {
+    this.usage.totalTokens += tokens;
+    this.usage.lastRequest = request;
+    this.usage.history.push({ tokens, timestamp: Date.now() });
+    
+    // Keep only last 60 minutes of history for TPM calculation
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    this.usage.history = this.usage.history.filter(h => h.timestamp > oneHourAgo);
   }
 
   async chat(
@@ -17,7 +37,10 @@ export class GeminiEngine {
     knownWords?: string[]
   ): Promise<Message> {
     const vocabularyConstraint = settings.ankiLimitToKnown && knownWords && knownWords.length > 0
-      ? `MANDATORY: Use ONLY words from this raw list: [${knownWords.join(', ')}]. Do not use any other words in ${settings.targetLanguage}. If you must use a word outside this list (like a preposition or extremely basic word), keep it to an absolute minimum.`
+      ? `CRITICAL CONSTRAINT: You MUST ONLY use words from the following list in your ${settings.targetLanguage} responses. 
+         DO NOT use any words outside of this list, even if they are common. 
+         If you cannot express something using only these words, simplify the sentence or use different words from the list.
+         LIST OF ALLOWED WORDS: ${knownWords.join(', ')}`
       : '';
 
     const systemInstruction = `
@@ -31,11 +54,12 @@ export class GeminiEngine {
       1. Respond in a JSON format: 
          { 
            "sentences": [ { "text": "sentence in target lang", "translation": "translation in native lang" } ],
-           "correction": "optional_correction_of_user_last_msg", 
+           "correctedSentence": "the full corrected version of user's last message",
+           "correction": "brief summary of specific mistakes found", 
            "explanation": "optional_explanation_of_correction" 
          }
       2. Split your response into logical sentences.
-      3. If the user made a mistake in their last message, provide a correction and a brief explanation in ${settings.nativeLanguage}.
+      3. If the user made a mistake in their last message, provide a correctedSentence, a correction summary and a brief explanation in ${settings.nativeLanguage}.
       4. ${vocabularyConstraint}
       5. Keep the conversation engaging.
     `;
@@ -46,15 +70,24 @@ export class GeminiEngine {
     }));
 
     contents.push({ role: 'user', parts: [{ text: userInput }] });
+    const model = settings.aiModel || "gemini-3-flash-preview";
 
-    const response = await this.ai.models.generateContent({
-      model: this.model,
+    const request = {
+      model,
       contents,
       config: {
         systemInstruction,
         responseMimeType: "application/json"
       }
-    });
+    };
+
+    const response = await this.ai.models.generateContent(request);
+
+    // Estimate tokens if usageMetadata is missing
+    const usage = response.usageMetadata?.totalTokenCount || 
+                  Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
+    
+    this.trackUsage(usage, request);
 
     try {
       const data = JSON.parse(response.text);
@@ -63,6 +96,7 @@ export class GeminiEngine {
         role: 'model',
         text: fullText,
         sentences: data.sentences,
+        correctedSentence: data.correctedSentence,
         correction: data.correction,
         explanation: data.explanation
       };
@@ -77,18 +111,23 @@ export class GeminiEngine {
 
   async generateTopic(settings: UserSettings, knownWords?: string[]) {
     const vocabularyConstraint = settings.ankiLimitToKnown && knownWords && knownWords.length > 0
-      ? `The topic and description MUST encourage using ONLY these words: [${knownWords.join(', ')}].`
+      ? `CRITICAL CONSTRAINT: The topic and description MUST encourage using ONLY these words: ${knownWords.join(', ')}.`
       : '';
 
     const prompt = `Generate a creative writing topic for a ${settings.targetLanguage} learner at ${settings.cefrLevel} level. 
     ${vocabularyConstraint}
     Return JSON: { "topic": "Short Title", "description": "Detailed instructions in ${settings.nativeLanguage}" }`;
 
-    const response = await this.ai.models.generateContent({
-      model: this.model,
+    const request = {
+      model: settings.aiModel || "gemini-3-flash-preview",
       contents: prompt,
       config: { responseMimeType: "application/json" }
-    });
+    };
+
+    const response = await this.ai.models.generateContent(request);
+    const usage = response.usageMetadata?.totalTokenCount || 
+                  Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
+    this.trackUsage(usage, request);
     return JSON.parse(response.text);
   }
 
@@ -97,11 +136,16 @@ export class GeminiEngine {
     Is it grammatically correct for ${settings.cefrLevel} level?
     Return JSON: { "isCorrect": boolean, "corrected": "...", "explanation": "Brief explanation in ${settings.nativeLanguage}" }`;
 
-    const response = await this.ai.models.generateContent({
-      model: this.model,
+    const request = {
+      model: settings.aiModel || "gemini-3-flash-preview",
       contents: prompt,
       config: { responseMimeType: "application/json" }
-    });
+    };
+
+    const response = await this.ai.models.generateContent(request);
+    const usage = response.usageMetadata?.totalTokenCount || 
+                  Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
+    this.trackUsage(usage, request);
     return JSON.parse(response.text);
   }
 
@@ -114,7 +158,9 @@ export class GeminiEngine {
     knownWords?: string[]
   ) {
     const vocabularyConstraint = settings.ankiLimitToKnown && knownWords && knownWords.length > 0
-      ? `MANDATORY: Use ONLY words from this raw list for the questions and answers: [${knownWords.join(', ')}]. Do not use any other words in ${settings.targetLanguage}.`
+      ? `CRITICAL CONSTRAINT: You MUST ONLY use words from the following list for the questions and answers in ${settings.targetLanguage}. 
+         DO NOT use any other words.
+         LIST OF ALLOWED WORDS: ${knownWords.join(', ')}`
       : '';
 
     const prompt = `Generate ${count} exercises of type "${type}" for ${settings.targetLanguage} learners at ${settings.cefrLevel} level. 
@@ -123,13 +169,18 @@ export class GeminiEngine {
     ${vocabularyConstraint}
     Return as a JSON array of objects: { "question": "...", "answer": "...", "explanation": "..." }`;
 
-    const response = await this.ai.models.generateContent({
-      model: this.model,
+    const request = {
+      model: settings.aiModel || "gemini-3-flash-preview",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
       }
-    });
+    };
+
+    const response = await this.ai.models.generateContent(request);
+    const usage = response.usageMetadata?.totalTokenCount || 
+                  Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
+    this.trackUsage(usage, request);
 
     return JSON.parse(response.text);
   }
@@ -139,13 +190,18 @@ export class GeminiEngine {
     Provide a correction and explanation for each sentence if needed.
     Return as JSON: { "sentences": [ { "original": "...", "corrected": "...", "explanation": "..." } ] }`;
 
-    const response = await this.ai.models.generateContent({
-      model: this.model,
+    const request = {
+      model: settings.aiModel || "gemini-3-flash-preview",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
       }
-    });
+    };
+
+    const response = await this.ai.models.generateContent(request);
+    const usage = response.usageMetadata?.totalTokenCount || 
+                  Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
+    this.trackUsage(usage, request);
 
     return JSON.parse(response.text);
   }

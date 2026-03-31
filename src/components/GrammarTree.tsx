@@ -1,13 +1,8 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronRight, CheckSquare, Square } from 'lucide-react';
-import { GrammarSection, GrammarSubsection } from '../types';
+import { GrammarSection, GrammarSubsection, SelectedTopic } from '../types';
 import { GlassCard } from './GlassUI';
-
-export interface SelectedTopic {
-  title: string;
-  levelInfo?: string[];
-}
 
 interface GrammarTreeProps {
   sections: GrammarSection[];
@@ -26,7 +21,7 @@ const SubsectionItem: React.FC<{
   const [isExpanded, setIsExpanded] = useState(false);
   const hasSubsections = item.subsections && item.subsections.length > 0;
   const currentLevelInfo = item.levelInfo?.[cefrLevel];
-  const isSelected = selectedTopics.some(t => t.title === item.title);
+  const isSelected = (selectedTopics || []).some(t => t.title === item.title);
 
   return (
     <div className="w-full">

@@ -1,6 +1,11 @@
 export type Language = 'pl' | 'de' | 'es' | 'en';
 export type CEFRLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
 
+export interface SelectedTopic {
+  title: string;
+  levelInfo?: string[];
+}
+
 export interface UserSettings {
   name: string;
   avatar: string;
@@ -17,6 +22,7 @@ export interface UserSettings {
   ankiFieldName: string;
   ankiFilterDays: number;
   ankiFilterStatus: 'all' | 'learned' | 'reviewed';
+  aiModel: string;
 }
 
 export interface GrammarSubsection {
@@ -43,6 +49,7 @@ export interface Message {
   text: string; // Full text for user, or combined for model
   sentences?: ChatSentence[]; // For model responses
   correction?: string;
+  correctedSentence?: string;
   explanation?: string;
 }
 

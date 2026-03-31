@@ -8,16 +8,34 @@ import JSZip from 'jszip';
 export class AnkiService {
   private sqlPromise: Promise<any> | null = null;
 
-  private async getSql() {
-    if (!this.sqlPromise) {
-      console.log("[AnkiService] Inicjalizacja silnika SQL z CDN...");
-      this.sqlPromise = initSqlJs({
-        // Użycie CDN rozwiązuje błąd "expected magic word", jeśli lokalny serwer zwraca HTML zamiast WASM
-        locateFile: file => `https://sql.js.org/dist/${file}`
-      });
+private async getSql() {
+  if (!this.sqlPromise) {
+    console.log("[AnkiService] Inicjalizacja silnika SQL z CDN...");
+    
+    // Używamy stabilnego CDN: cdnjs
+    const SQL_JS_VERSION = '1.6.2';
+    const cdnBase = `https://cdnjs.cloudflare.com/ajax/libs/sql.js/${SQL_JS_VERSION}/`;
+
+    // Sprawdzamy, czy initSqlJs jest już w oknie (po dodaniu <script> w HTML)
+    const initSqlJs = (window as any).initSqlJs;
+
+    if (!initSqlJs) {
+      throw new Error("Nie znaleziono initSqlJs. Upewnij się, że masz <script src='...' /> w index.html");
     }
-    return this.sqlPromise;
+
+    this.sqlPromise = initSqlJs({
+      // To jest KLUCZOWY moment - wskazujemy, skąd DOKŁADNIE pobrać plik .wasm
+      locateFile: (file: string) => {
+        // Zamiast domyślnego adresu, który zwraca 404, podajemy ten z cdnjs
+        if (file.endsWith('.wasm')) {
+          return `${cdnBase}sql-wasm.wasm`;
+        }
+        return `${cdnBase}${file}`;
+      }
+    });
   }
+  return this.sqlPromise;
+}
 
   private async request(url: string, action: string, params?: any): Promise<any> {
     try {

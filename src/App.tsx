@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Send, 
@@ -17,11 +17,14 @@ import {
   Languages,
   BookOpen,
   User as UserIcon,
-  Plus
+  Plus,
+  Activity,
+  Terminal,
+  Cpu
 } from 'lucide-react';
 import { GlassCard, GlassButton } from './components/GlassUI';
 import { BottomNav } from './components/BottomNav';
-import { UserSettings, Message, AnkiWord } from './types';
+import { UserSettings, Message, AnkiWord, SelectedTopic, GrammarSubsection } from './types';
 import { GeminiEngine } from './services/GeminiEngine';
 import { AnkiService } from './services/AnkiService';
 import { GrammarTree } from './components/GrammarTree';
@@ -43,6 +46,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   ankiFieldName: '',
   ankiFilterDays: 30,
   ankiFilterStatus: 'all',
+  aiModel: 'gemini-3-flash-preview',
 };
 
 const ChatMessage: React.FC<{ message: Message; settings: UserSettings }> = ({ message, settings }) => {
@@ -96,21 +100,27 @@ const ChatMessage: React.FC<{ message: Message; settings: UserSettings }> = ({ m
           </AnimatePresence>
         </motion.div>
 
-        {isModel && (message.correction || message.explanation) && (
+        {isModel && (message.correctedSentence || message.correction || message.explanation) && (
           <motion.div
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-xl space-y-2"
           >
+            {message.correctedSentence && (
+              <div className="flex items-start gap-2 text-blue-300">
+                <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
+                <p className="text-xs font-bold">Poprawione zdanie: <span className="font-normal italic text-white/90">{message.correctedSentence}</span></p>
+              </div>
+            )}
             {message.correction && (
               <div className="flex items-start gap-2 text-amber-200">
                 <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                <p className="text-xs font-bold">Poprawka: <span className="font-normal italic">{message.correction}</span></p>
+                <p className="text-xs font-bold">Błędy: <span className="font-normal italic">{message.correction}</span></p>
               </div>
             )}
             {message.explanation && (
               <div className="flex items-start gap-2 text-white/60">
-                <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
+                <div className="w-[14px] h-[14px] shrink-0" />
                 <p className="text-[10px] leading-relaxed">{message.explanation}</p>
               </div>
             )}
@@ -144,6 +154,101 @@ export default function App() {
   const engine = useRef<GeminiEngine | null>(null);
   const anki = useRef(new AnkiService());
 
+  const filteredWordsList = useMemo(() => {
+    if (!knownWords.length) return [];
+    
+    return knownWords.map(word => {
+      let displayWord = word.word || "";
+      if (settings.ankiFieldName) {
+        displayWord = word.fields[settings.ankiFieldName] || "";
+        // If the selected field is empty, try to find the first non-empty field as fallback
+        if (!displayWord || displayWord.trim().length === 0) {
+          const firstNonEmpty = Object.values(word.fields).find(v => typeof v === 'string' && v.trim().length > 0) as string | undefined;
+          displayWord = firstNonEmpty || "Empty";
+        }
+      }
+      
+      return {
+        ...word,
+        word: displayWord.trim()
+      };
+    }).filter(word => {
+      // Filter out truly empty words if any
+      const val = word.word;
+      if (!val || val === "Empty" || val.trim().length === 0) return false;
+      
+      // Filter by status
+      if (settings.ankiFilterStatus === 'learned' && word.status === 'new') return false;
+      if (settings.ankiFilterStatus === 'reviewed' && word.status !== 'review') return false;
+      
+      // Filter by days since last review
+      if (word.lastReview) {
+        const diffDays = (Date.now() - word.lastReview) / (1000 * 60 * 60 * 24);
+        if (diffDays > settings.ankiFilterDays) return false;
+      }
+      
+      return true;
+    });
+  }, [knownWords, settings.ankiFieldName, settings.ankiFilterStatus, settings.ankiFilterDays]);
+
+  // Auto-update fields and sync when deck changes
+  useEffect(() => {
+    if (!settings.ankiDeckName) return;
+
+    const updateFieldsAndSync = async () => {
+      if (ankiApkgData) {
+        const deck = (Object.values(ankiApkgData.decks) as any[]).find(d => d.name === settings.ankiDeckName);
+        if (deck) {
+          try {
+            const res = ankiApkgData.db.exec(`
+              SELECT mid FROM notes n 
+              JOIN cards c ON n.id = c.nid 
+              WHERE c.did = ${deck.id} 
+              LIMIT 1
+            `);
+            if (res.length > 0) {
+              const mid = res[0].values[0][0];
+              const model = ankiApkgData.models[mid];
+              if (model && model.flds) {
+                const fields = model.flds.map((f: any) => f.name);
+                setAvailableFields(fields);
+                // If current field is not in the new deck, reset to first field
+                if (!fields.includes(settings.ankiFieldName)) {
+                  setSettings(prev => ({ ...prev, ankiFieldName: fields[0] }));
+                }
+              }
+            }
+          } catch (e) {
+            console.error("Error updating fields for deck:", e);
+          }
+        }
+      } else if (settings.ankiUrl) {
+        // For AnkiConnect, we also want to update fields when deck changes
+        try {
+          const structure = await anki.current.getDeckStructure(settings.ankiUrl, settings.ankiDeckName);
+          setAvailableFields(structure.fields);
+          if (!structure.fields.includes(settings.ankiFieldName)) {
+            setSettings(prev => ({ ...prev, ankiFieldName: structure.fields[0] }));
+          }
+        } catch (e) {
+          console.error("Error fetching deck structure:", e);
+        }
+      }
+      
+      // Trigger sync to get words for the new deck
+      syncAnki();
+    };
+
+    updateFieldsAndSync();
+  }, [settings.ankiDeckName, ankiApkgData]);
+
+  // Also sync when field name changes
+  useEffect(() => {
+    if (settings.ankiDeckName && settings.ankiFieldName) {
+      syncAnki();
+    }
+  }, [settings.ankiFieldName]);
+
   const [writingText, setWritingText] = useState('');
   const [writingTopic, setWritingTopic] = useState({ topic: 'Wybierz temat', description: 'Kliknij przycisk poniżej, aby wylosować temat.' });
   const [isGeneratingTopic, setIsGeneratingTopic] = useState(false);
@@ -168,6 +273,9 @@ export default function App() {
   const [isSyncingAnki, setIsSyncingAnki] = useState(false);
   const [availableDecks, setAvailableDecks] = useState<string[]>([]);
   const [availableFields, setAvailableFields] = useState<string[]>([]);
+  const [selectedTopics, setSelectedTopics] = useState<SelectedTopic[]>([]);
+  const [showTokenModal, setShowTokenModal] = useState(false);
+  const [tokenStats, setTokenStats] = useState({ total: 0, tpm: 0 });
 
   const [customCode, setCustomCode] = useState(`// Możesz używać: ankiData, settings, knownWords
 // Przykład: return ankiData ? Object.keys(ankiData.decks) : 'Brak danych APKG';
@@ -196,28 +304,45 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
     }
   };
 
-  const getFilteredWords = () => {
-    if (!knownWords.length) return [];
-    
-    return knownWords.map(word => ({
-      ...word,
-      word: settings.ankiFieldName ? (word.fields[settings.ankiFieldName] || word.word) : word.word
-    })).filter(word => {
-      // Filter by status
-      if (settings.ankiFilterStatus === 'learned' && word.status === 'new') return false;
-      if (settings.ankiFilterStatus === 'reviewed' && word.status !== 'review') return false;
-      
-      // Filter by days since last review
-      if (word.lastReview) {
-        const diffDays = (Date.now() - word.lastReview) / (1000 * 60 * 60 * 24);
-        if (diffDays > settings.ankiFilterDays) return false;
+  const handleToggleTopic = (item: GrammarSubsection) => {
+    setSelectedTopics(prev => {
+      const exists = prev.some(t => t.title === item.title);
+      if (exists) {
+        return prev.filter(t => t.title !== item.title);
+      } else {
+        return [...prev, { title: item.title, levelInfo: item.levelInfo?.[settings.cefrLevel] }];
       }
-      
-      return true;
     });
   };
 
-  const filteredWordsList = getFilteredWords();
+  const getContextSizeInfo = () => {
+    if (!settings.ankiLimitToKnown || filteredWordsList.length === 0) return null;
+    const wordsString = filteredWordsList.map(w => w.word).join(',');
+    const charCount = wordsString.length;
+    const approxTokens = Math.ceil(charCount / 4);
+    return { charCount, approxTokens };
+  };
+
+  const contextInfo = getContextSizeInfo();
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (engine.current) {
+        const usage = engine.current.usage;
+        const now = Date.now();
+        const oneMinuteAgo = now - 60 * 1000;
+        const recentTokens = usage.history
+          .filter(h => h.timestamp > oneMinuteAgo)
+          .reduce((sum, h) => sum + h.tokens, 0);
+        
+        setTokenStats({
+          total: usage.totalTokens,
+          tpm: recentTokens
+        });
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   const addLog = (msg: string) => {
     setAnkiLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 10));
@@ -310,16 +435,24 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
   };
 
   const startExercises = async () => {
-    if (!engine.current || !exerciseConfig.topic) return;
+    const topics = selectedTopics.length > 0 
+      ? selectedTopics.map(t => t.title).join(', ') 
+      : exerciseConfig.topic;
+
+    if (!engine.current || !topics) return;
     setIsGeneratingExercises(true);
     setActiveExercise(true);
     try {
+      const combinedLevelInfo = selectedTopics.length > 0
+        ? selectedTopics.flatMap(t => t.levelInfo || [])
+        : exerciseConfig.levelInfo;
+
       const exercises = await engine.current.generateExercises(
         settings, 
-        exerciseConfig.topic, 
+        topics, 
         exerciseConfig.type, 
         exerciseConfig.count,
-        exerciseConfig.levelInfo,
+        combinedLevelInfo,
         settings.ankiLimitToKnown ? filteredWordsList.map(w => w.word) : undefined
       );
       setExerciseList(exercises);
@@ -725,11 +858,8 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                     <GrammarTree 
                       sections={settings.targetLanguage === 'de' ? GERMAN_GRAMMAR : settings.targetLanguage === 'es' ? SPANISH_GRAMMAR : ENGLISH_GRAMMAR}
                       cefrLevel={settings.cefrLevel}
-                      onSelect={(item) => setExerciseConfig({
-                        ...exerciseConfig, 
-                        topic: item.title,
-                        levelInfo: item.levelInfo?.[settings.cefrLevel]
-                      })}
+                      selectedTopics={selectedTopics}
+                      onToggleTopic={handleToggleTopic}
                     />
                   </div>
                 </div>
@@ -746,17 +876,45 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
               className="space-y-6"
             >
               <div className="flex items-center gap-6 mb-8">
-                <div className="relative">
-                  <img src={settings.avatar} className="w-24 h-24 rounded-[2rem] border-2 border-blue-500/50 p-1" alt="Avatar" />
-                  <div className="absolute -bottom-2 -right-2 bg-blue-500 p-2 rounded-xl shadow-lg">
-                    <Plus size={16} />
+                <div className="relative group">
+                  <img src={settings.avatar} className="w-24 h-24 rounded-[2rem] border-2 border-blue-500/50 p-1 object-cover" alt="Avatar" />
+                </div>
+                <div className="flex-1 space-y-2">
+                  <input 
+                    type="text" 
+                    value={settings.name}
+                    onChange={(e) => setSettings({...settings, name: e.target.value})}
+                    className="text-2xl font-bold bg-transparent border-b border-transparent hover:border-white/20 focus:border-blue-500 focus:outline-none w-full"
+                    placeholder="Twoje imię"
+                  />
+                  <div className="flex items-center gap-2">
+                    <span className="text-white/40 text-[10px] font-bold uppercase tracking-widest">Poziom:</span>
+                    <select 
+                      value={settings.cefrLevel}
+                      onChange={(e) => setSettings({...settings, cefrLevel: e.target.value as any})}
+                      className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-xs outline-none"
+                    >
+                      {['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map(lvl => (
+                        <option key={lvl} value={lvl}>{lvl}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
-                <div>
-                  <h2 className="text-2xl font-bold">{settings.name}</h2>
-                  <p className="text-white/40 font-medium">Poziom {settings.cefrLevel}</p>
-                </div>
               </div>
+
+              <GlassCard className="p-6 space-y-4">
+                <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">Profil</h3>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-white/60">URL Avatara</label>
+                  <input 
+                    type="text"
+                    value={settings.avatar}
+                    onChange={(e) => setSettings({...settings, avatar: e.target.value})}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:border-blue-500/50 text-xs"
+                    placeholder="https://..."
+                  />
+                </div>
+              </GlassCard>
 
               <GlassCard className="p-6 space-y-6">
                 <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">Ustawienia Językowe</h3>
@@ -784,6 +942,41 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                       <option value="es">Hiszpański</option>
                     </select>
                   </div>
+                </div>
+              </GlassCard>
+
+              <GlassCard className="p-6 space-y-6">
+                <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">Model AI</h3>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-white/60">Wybierz model</label>
+                    <select 
+                      value={['gemini-3-flash-preview', 'gemini-3.1-pro-preview', 'gemma-2-27b-it'].includes(settings.aiModel) ? settings.aiModel : 'custom'}
+                      onChange={(e) => {
+                        if (e.target.value !== 'custom') {
+                          setSettings({...settings, aiModel: e.target.value});
+                        }
+                      }}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none"
+                    >
+                      <option value="gemini-3-flash-preview">Gemini 3 Flash (Default)</option>
+                      <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
+                      <option value="gemma-2-27b-it">Gemma 2 27B</option>
+                      <option value="custom">Własny model / Inny...</option>
+                    </select>
+                  </div>
+                  {(!['gemini-3-flash-preview', 'gemini-3.1-pro-preview', 'gemma-2-27b-it'].includes(settings.aiModel) || settings.aiModel === 'custom') && (
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-white/60">Nazwa modelu Google</label>
+                      <input 
+                        type="text"
+                        value={settings.aiModel === 'custom' ? '' : settings.aiModel}
+                        onChange={(e) => setSettings({...settings, aiModel: e.target.value})}
+                        placeholder="np. gemini-1.5-pro-latest"
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:border-blue-500/50"
+                      />
+                    </div>
+                  )}
                 </div>
               </GlassCard>
 
@@ -950,7 +1143,12 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <span className="text-sm text-white/60 block">Ogranicz AI do znanych słów</span>
-                    <p className="text-[10px] text-white/40 italic">AI będzie budować zdania głównie z Twoich fiszek</p>
+                    <p className="text-[10px] text-white/40 italic">AI będzie budować zdania wyłącznie z Twoich fiszek</p>
+                    {contextInfo && (
+                      <p className="text-[9px] text-blue-400 font-medium">
+                        Kontekst: ~{contextInfo.approxTokens} tokenów ({contextInfo.charCount} znaków)
+                      </p>
+                    )}
                   </div>
                   <input 
                     type="checkbox" 
@@ -1031,6 +1229,16 @@ return await response.json();`)}
                     className="w-full bg-white/5 border border-white/10 rounded-xl p-4 outline-none focus:border-blue-500/50"
                   />
                 )}
+
+                <div className="pt-4 border-t border-white/5 flex gap-4">
+                  <button 
+                    onClick={() => setShowTokenModal(true)}
+                    className="flex-1 bg-white/5 border border-white/10 rounded-xl p-3 flex items-center justify-center gap-2 hover:bg-white/10 transition-all group"
+                  >
+                    <Activity size={16} className="text-blue-400 group-hover:scale-110 transition-transform" />
+                    <span className="text-xs font-bold">Statystyki Tokenów & API</span>
+                  </button>
+                </div>
               </GlassCard>
             </motion.div>
           )}
@@ -1038,6 +1246,89 @@ return await response.json();`)}
       </main>
 
       <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
+
+      {/* Token Usage Modal */}
+      <AnimatePresence>
+        {showTokenModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            onClick={() => setShowTokenModal(false)}
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-[#1a1a1a] border border-white/10 rounded-3xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/5">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-500/20 rounded-lg">
+                    <Cpu size={20} className="text-blue-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold">Monitor Zużycia AI</h2>
+                    <p className="text-xs text-white/40">Statystyki sesji i podgląd API</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowTokenModal(false)}
+                  className="p-2 hover:bg-white/5 rounded-full transition-colors"
+                >
+                  <RefreshCw size={20} className="text-white/40" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-1">
+                    <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider">Całkowite Tokeny</span>
+                    <p className="text-3xl font-mono font-bold text-blue-400">{tokenStats.total.toLocaleString()}</p>
+                  </div>
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-1">
+                    <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider">Tokeny na Minutę (TPM)</span>
+                    <p className="text-3xl font-mono font-bold text-green-400">{tokenStats.tpm.toLocaleString()}</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-white/40">
+                    <Terminal size={14} />
+                    <span className="text-xs font-bold uppercase tracking-wider">Ostatnie Zapytanie API (Body)</span>
+                  </div>
+                  <div className="bg-black/40 border border-white/5 rounded-2xl p-4 font-mono text-[10px] overflow-x-auto whitespace-pre custom-scrollbar text-blue-200/80 leading-relaxed">
+                    {engine.current?.usage.lastRequest ? (
+                      JSON.stringify(engine.current.usage.lastRequest, null, 2)
+                    ) : (
+                      <span className="italic text-white/20">Brak wysłanych zapytań w tej sesji.</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex gap-3 items-start">
+                  <AlertCircle size={16} className="text-amber-400 shrink-0 mt-0.5" />
+                  <p className="text-[10px] text-amber-200/70 leading-relaxed">
+                    Dane o tokenach są szacunkowe (bazują na metadanych API lub długości tekstu). 
+                    TPM jest liczony jako suma tokenów z ostatnich 60 sekund.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-4 bg-white/5 border-t border-white/5 flex justify-end">
+                <button 
+                  onClick={() => setShowTokenModal(false)}
+                  className="px-6 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-xs font-bold transition-all"
+                >
+                  Zamknij
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
