@@ -37,10 +37,11 @@ export class GeminiEngine {
     knownWords?: string[]
   ): Promise<Message> {
     const vocabularyConstraint = settings.ankiLimitToKnown && knownWords && knownWords.length > 0
-      ? `CRITICAL CONSTRAINT: You MUST ONLY use words from the following list in your ${settings.targetLanguage} responses. 
-         DO NOT use any words outside of this list, even if they are common. 
-         If you cannot express something using only these words, simplify the sentence or use different words from the list.
-         LIST OF ALLOWED WORDS: ${knownWords.join(', ')}`
+      ? `CRITICAL CONSTRAINT: You MUST ONLY use vocabulary words from the following list in your ${settings.targetLanguage} responses. 
+         You MAY use basic grammar words (articles, prepositions, pronouns, basic conjunctions, auxiliary verbs) even if they are not in the list.
+         However, for nouns, main verbs, adjectives, and adverbs, you MUST strictly stick to the allowed words.
+         If you cannot express something using only these words, simplify the sentence.
+         LIST OF ALLOWED VOCABULARY: ${knownWords.join(', ')}`
       : '';
 
     const systemInstruction = `
@@ -111,7 +112,7 @@ export class GeminiEngine {
 
   async generateTopic(settings: UserSettings, knownWords?: string[]) {
     const vocabularyConstraint = settings.ankiLimitToKnown && knownWords && knownWords.length > 0
-      ? `CRITICAL CONSTRAINT: The topic and description MUST encourage using ONLY these words: ${knownWords.join(', ')}.`
+      ? `CRITICAL CONSTRAINT: The topic and description MUST encourage using ONLY these vocabulary words: ${knownWords.join(', ')}. You may use basic grammar words.`
       : '';
 
     const prompt = `Generate a creative writing topic for a ${settings.targetLanguage} learner at ${settings.cefrLevel} level. 
@@ -158,9 +159,10 @@ export class GeminiEngine {
     knownWords?: string[]
   ) {
     const vocabularyConstraint = settings.ankiLimitToKnown && knownWords && knownWords.length > 0
-      ? `CRITICAL CONSTRAINT: You MUST ONLY use words from the following list for the questions and answers in ${settings.targetLanguage}. 
-         DO NOT use any other words.
-         LIST OF ALLOWED WORDS: ${knownWords.join(', ')}`
+      ? `CRITICAL CONSTRAINT: You MUST ONLY use vocabulary words from the following list for the questions and answers in ${settings.targetLanguage}. 
+         You MAY use basic grammar words (articles, prepositions, pronouns, basic conjunctions, auxiliary verbs) even if they are not in the list.
+         However, for nouns, main verbs, adjectives, and adverbs, you MUST strictly stick to the allowed words.
+         LIST OF ALLOWED VOCABULARY: ${knownWords.join(', ')}`
       : '';
 
     const prompt = `Generate ${count} exercises of type "${type}" for ${settings.targetLanguage} learners at ${settings.cefrLevel} level. 

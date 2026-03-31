@@ -16,43 +16,48 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
   ];
 
   return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md z-50">
-      <div className="bg-black/40 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-2 flex justify-around items-center shadow-2xl">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className="relative p-4 group"
-            >
-              {isActive && (
-                <motion.div
-                  layoutId="activeTab"
-                  className="absolute inset-0 bg-white/10 rounded-2xl"
-                  transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md z-50 flex justify-center">
+      <div className="liquidGlass-wrapper dock">
+        <div className="liquidGlass-effect"></div>
+        <div className="liquidGlass-tint"></div>
+        <div className="liquidGlass-shine"></div>
+        <div className="liquidGlass-text dock">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className="relative p-4 group dock-icon"
+              >
+                {isActive && (
+                  <motion.div
+                    layoutId="activeTab"
+                    className="absolute inset-0 bg-white/10 rounded-2xl"
+                    transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
+                  />
+                )}
+                <Icon 
+                  size={28}
+                  className={`relative z-10 transition-colors duration-300 ${
+                    isActive ? 'text-blue-400' : 'text-white/60 group-hover:text-white'
+                  }`}
                 />
-              )}
-              <Icon 
-                size={24}
-                className={`relative z-10 transition-colors duration-300 ${
-                  isActive ? 'text-blue-400' : 'text-white/40 group-hover:text-white/70'
-                }`}
-              />
-              {isActive && (
-                <motion.span
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="absolute -bottom-1 left-1/2 -translate-x-1/2 text-[10px] font-bold text-blue-400 uppercase tracking-widest"
-                >
-                  •
-                </motion.span>
-              )}
-            </button>
-          );
-        })}
+                {isActive && (
+                  <motion.span
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="absolute -bottom-1 left-1/2 -translate-x-1/2 text-[10px] font-bold text-blue-600 uppercase tracking-widest"
+                  >
+                    •
+                  </motion.span>
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

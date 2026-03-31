@@ -5,21 +5,23 @@ interface GlassCardProps {
   children: React.ReactNode;
   className?: string;
   onClick?: () => void;
+  radiusClass?: string;
 }
 
-export const GlassCard: React.FC<GlassCardProps> = ({ children, className = "", onClick }) => {
+export const GlassCard: React.FC<GlassCardProps> = ({ children, className = "", onClick, radiusClass = "rounded-[2rem]" }) => {
   return (
     <motion.div
       whileHover={onClick ? { scale: 1.02 } : {}}
       whileTap={onClick ? { scale: 0.98 } : {}}
       onClick={onClick}
-      className={`
-        bg-white/10 backdrop-blur-xl border border-white/20 
-        rounded-[2rem] shadow-2xl overflow-hidden
-        ${className}
-      `}
+      className={`liquidGlass-wrapper ${radiusClass} ${className}`}
     >
-      {children}
+      <div className={`liquidGlass-effect ${radiusClass}`}></div>
+      <div className={`liquidGlass-tint ${radiusClass} bg-white/10`}></div>
+      <div className={`liquidGlass-shine ${radiusClass}`}></div>
+      <div className="liquidGlass-text w-full">
+        {children}
+      </div>
     </motion.div>
   );
 };
@@ -31,12 +33,6 @@ export const GlassButton: React.FC<{
   variant?: 'primary' | 'secondary' | 'ghost';
   disabled?: boolean;
 }> = ({ children, onClick, className = "", variant = 'primary', disabled = false }) => {
-  const variants = {
-    primary: "bg-gradient-to-br from-blue-500/80 to-purple-600/80 text-white shadow-[0_0_20px_rgba(59,130,246,0.5)]",
-    secondary: "bg-white/20 text-white border border-white/30",
-    ghost: "bg-transparent text-white/70 hover:text-white"
-  };
-
   return (
     <motion.button
       whileHover={!disabled ? { scale: 1.05, y: -2 } : {}}
@@ -44,13 +40,66 @@ export const GlassButton: React.FC<{
       onClick={!disabled ? onClick : undefined}
       disabled={disabled}
       className={`
-        px-6 py-3 rounded-2xl font-medium transition-all duration-300
-        ${variants[variant]}
+        liquidGlass-wrapper rounded-2xl transition-all duration-300
         ${disabled ? 'opacity-50 cursor-not-allowed grayscale' : ''}
         ${className}
       `}
     >
-      {children}
+      <div className="liquidGlass-effect rounded-2xl"></div>
+      <div className={`liquidGlass-tint rounded-2xl ${variant === 'primary' ? 'bg-blue-500/30' : variant === 'secondary' ? 'bg-white/30' : 'bg-transparent'}`}></div>
+      <div className="liquidGlass-shine rounded-2xl"></div>
+      <div className="liquidGlass-text px-6 py-3 font-medium flex items-center justify-center">
+        {children}
+      </div>
     </motion.button>
+  );
+};
+
+export const GlassInput: React.FC<React.InputHTMLAttributes<HTMLInputElement> & { radiusClass?: string }> = ({ className = "", radiusClass = "rounded-xl", ...props }) => {
+  return (
+    <div className={`liquidGlass-wrapper ${radiusClass} ${className}`}>
+      <div className={`liquidGlass-effect ${radiusClass}`}></div>
+      <div className={`liquidGlass-tint ${radiusClass} bg-white/10`}></div>
+      <div className={`liquidGlass-shine ${radiusClass}`}></div>
+      <input 
+        {...props}
+        className="liquidGlass-text w-full bg-transparent outline-none p-3 placeholder-white/40 text-white"
+      />
+    </div>
+  );
+};
+
+export const GlassTextarea: React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElement> & { radiusClass?: string }> = ({ className = "", radiusClass = "rounded-xl", ...props }) => {
+  return (
+    <div className={`liquidGlass-wrapper ${radiusClass} ${className}`}>
+      <div className={`liquidGlass-effect ${radiusClass}`}></div>
+      <div className={`liquidGlass-tint ${radiusClass} bg-white/10`}></div>
+      <div className={`liquidGlass-shine ${radiusClass}`}></div>
+      <textarea 
+        {...props}
+        className="liquidGlass-text w-full bg-transparent outline-none p-4 placeholder-white/40 text-white resize-none"
+      />
+    </div>
+  );
+};
+
+export const GlassSelect: React.FC<React.SelectHTMLAttributes<HTMLSelectElement> & { radiusClass?: string }> = ({ className = "", radiusClass = "rounded-xl", children, ...props }) => {
+  return (
+    <div className={`liquidGlass-wrapper ${radiusClass} ${className}`}>
+      <div className={`liquidGlass-effect ${radiusClass}`}></div>
+      <div className={`liquidGlass-tint ${radiusClass} bg-white/10`}></div>
+      <div className={`liquidGlass-shine ${radiusClass}`}></div>
+      <select 
+        {...props}
+        className="liquidGlass-text w-full bg-transparent outline-none p-3 appearance-none cursor-pointer text-white"
+      >
+        {children}
+      </select>
+      <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-white/60">
+        <svg width="12" height="8" viewBox="0 0 12 8" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </div>
+    </div>
   );
 };

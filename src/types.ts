@@ -9,6 +9,7 @@ export interface SelectedTopic {
 export interface UserSettings {
   name: string;
   avatar: string;
+  showProfile: boolean;
   nativeLanguage: Language;
   targetLanguage: Language;
   cefrLevel: CEFRLevel;

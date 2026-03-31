@@ -953,7 +953,9 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                     <select 
                       value={['gemini-3-flash-preview', 'gemini-3.1-pro-preview', 'gemma-2-27b-it'].includes(settings.aiModel) ? settings.aiModel : 'custom'}
                       onChange={(e) => {
-                        if (e.target.value !== 'custom') {
+                        if (e.target.value === 'custom') {
+                          setSettings({...settings, aiModel: ''});
+                        } else {
                           setSettings({...settings, aiModel: e.target.value});
                         }
                       }}
@@ -1221,13 +1223,29 @@ return await response.json();`)}
                   />
                 </div>
                 {!settings.useStudioKey && (
-                  <input
-                    type="password"
-                    value={settings.geminiApiKey}
-                    onChange={(e) => setSettings({...settings, geminiApiKey: e.target.value})}
-                    placeholder="Wprowadź klucz API..."
-                    className="w-full bg-white/5 border border-white/10 rounded-xl p-4 outline-none focus:border-blue-500/50"
-                  />
+                  <div className="space-y-2">
+                    <input
+                      type="password"
+                      value={settings.geminiApiKey}
+                      onChange={(e) => setSettings({...settings, geminiApiKey: e.target.value})}
+                      placeholder="Wprowadź klucz API..."
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-4 outline-none focus:border-blue-500/50"
+                    />
+                    <GlassButton 
+                      onClick={async () => {
+                        try {
+                          const engine = new GeminiEngine(settings.geminiApiKey);
+                          await engine.checkSentence(settings, "Hello");
+                          alert("Klucz działa poprawnie!");
+                        } catch (e) {
+                          alert("Błąd: Klucz nie działa. Sprawdź czy jest poprawny.");
+                        }
+                      }}
+                      className="w-full text-xs"
+                    >
+                      Testuj klucz
+                    </GlassButton>
+                  </div>
                 )}
 
                 <div className="pt-4 border-t border-white/5 flex gap-4">
