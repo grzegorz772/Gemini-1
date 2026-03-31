@@ -33,6 +33,7 @@ import { GERMAN_GRAMMAR, SPANISH_GRAMMAR, ENGLISH_GRAMMAR } from './data/grammar
 const DEFAULT_SETTINGS: UserSettings = {
   name: 'Użytkownik',
   avatar: 'https://picsum.photos/seed/user/200',
+  showProfile: true,
   nativeLanguage: 'pl',
   targetLanguage: 'en',
   cefrLevel: 'B1',

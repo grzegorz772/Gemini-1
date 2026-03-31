@@ -29,6 +29,18 @@ export class GeminiEngine {
     this.usage.history = this.usage.history.filter(h => h.timestamp > oneHourAgo);
   }
 
+  private parseJson(text: string): any {
+    try {
+      // Remove markdown code blocks if present
+      const cleaned = text.replace(/```json\n?|```/g, '').trim();
+      return JSON.parse(cleaned);
+    } catch (e) {
+      console.error("Failed to parse JSON response:", text);
+      // Fallback for non-JSON responses if possible, or rethrow
+      throw e;
+    }
+  }
+
   async chat(
     history: Message[],
     userInput: string,
@@ -36,6 +48,9 @@ export class GeminiEngine {
     mode: 'dialogue' | 'narrative',
     knownWords?: string[]
   ): Promise<Message> {
+    const model = settings.aiModel || "gemini-3-flash-preview";
+    const isGemma = model.toLowerCase().includes('gemma');
+
     const vocabularyConstraint = settings.ankiLimitToKnown && knownWords && knownWords.length > 0
       ? `CRITICAL CONSTRAINT: You MUST ONLY use vocabulary words from the following list in your ${settings.targetLanguage} responses. 
          You MAY use basic grammar words (articles, prepositions, pronouns, basic conjunctions, auxiliary verbs) even if they are not in the list.
@@ -65,22 +80,30 @@ export class GeminiEngine {
       5. Keep the conversation engaging.
     `;
 
-    const contents = history.map(m => ({
-      role: m.role,
-      parts: [{ text: JSON.stringify(m) }]
-    }));
+    const request: any = { model };
 
-    contents.push({ role: 'user', parts: [{ text: userInput }] });
-    const model = settings.aiModel || "gemini-3-flash-preview";
-
-    const request = {
-      model,
-      contents,
-      config: {
+    if (isGemma) {
+      // For Gemma, combine everything into a single prompt string
+      let prompt = `INSTRUCTIONS:\n${systemInstruction}\n\n`;
+      if (history.length > 0) {
+        prompt += `CONVERSATION HISTORY:\n`;
+        history.forEach(m => {
+          prompt += `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}\n`;
+        });
+      }
+      prompt += `User: ${userInput}\nAssistant:`;
+      request.contents = prompt;
+    } else {
+      request.contents = history.map(m => ({
+        role: m.role,
+        parts: [{ text: m.text }]
+      }));
+      request.contents.push({ role: 'user', parts: [{ text: userInput }] });
+      request.config = {
         systemInstruction,
         responseMimeType: "application/json"
-      }
-    };
+      };
+    }
 
     const response = await this.ai.models.generateContent(request);
 
@@ -91,7 +114,7 @@ export class GeminiEngine {
     this.trackUsage(usage, request);
 
     try {
-      const data = JSON.parse(response.text);
+      const data = this.parseJson(response.text || "");
       const fullText = data.sentences.map((s: any) => s.text).join(' ');
       return {
         role: 'model',
@@ -104,13 +127,16 @@ export class GeminiEngine {
     } catch (e) {
       return {
         role: 'model',
-        text: response.text,
-        sentences: [{ text: response.text, translation: "Error parsing" }]
+        text: response.text || "Error",
+        sentences: [{ text: response.text || "Error", translation: "Error parsing" }]
       };
     }
   }
 
   async generateTopic(settings: UserSettings, knownWords?: string[]) {
+    const model = settings.aiModel || "gemini-3-flash-preview";
+    const isGemma = model.toLowerCase().includes('gemma');
+
     const vocabularyConstraint = settings.ankiLimitToKnown && knownWords && knownWords.length > 0
       ? `CRITICAL CONSTRAINT: The topic and description MUST encourage using ONLY these vocabulary words: ${knownWords.join(', ')}. You may use basic grammar words.`
       : '';
@@ -119,35 +145,44 @@ export class GeminiEngine {
     ${vocabularyConstraint}
     Return JSON: { "topic": "Short Title", "description": "Detailed instructions in ${settings.nativeLanguage}" }`;
 
-    const request = {
-      model: settings.aiModel || "gemini-3-flash-preview",
-      contents: prompt,
-      config: { responseMimeType: "application/json" }
-    };
+    const request: any = { model };
+
+    if (isGemma) {
+      request.contents = prompt;
+    } else {
+      request.contents = prompt;
+      request.config = { responseMimeType: "application/json" };
+    }
 
     const response = await this.ai.models.generateContent(request);
     const usage = response.usageMetadata?.totalTokenCount || 
                   Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
     this.trackUsage(usage, request);
-    return JSON.parse(response.text);
+    return this.parseJson(response.text || "");
   }
 
   async checkSentence(settings: UserSettings, sentence: string) {
+    const model = settings.aiModel || "gemini-3-flash-preview";
+    const isGemma = model.toLowerCase().includes('gemma');
+
     const prompt = `Check this single sentence in ${settings.targetLanguage}: "${sentence}". 
     Is it grammatically correct for ${settings.cefrLevel} level?
     Return JSON: { "isCorrect": boolean, "corrected": "...", "explanation": "Brief explanation in ${settings.nativeLanguage}" }`;
 
-    const request = {
-      model: settings.aiModel || "gemini-3-flash-preview",
-      contents: prompt,
-      config: { responseMimeType: "application/json" }
-    };
+    const request: any = { model };
+
+    if (isGemma) {
+      request.contents = prompt;
+    } else {
+      request.contents = prompt;
+      request.config = { responseMimeType: "application/json" };
+    }
 
     const response = await this.ai.models.generateContent(request);
     const usage = response.usageMetadata?.totalTokenCount || 
                   Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
     this.trackUsage(usage, request);
-    return JSON.parse(response.text);
+    return this.parseJson(response.text || "");
   }
 
   async generateExercises(
@@ -158,6 +193,9 @@ export class GeminiEngine {
     levelInfo?: string[],
     knownWords?: string[]
   ) {
+    const model = settings.aiModel || "gemini-3-flash-preview";
+    const isGemma = model.toLowerCase().includes('gemma');
+
     const vocabularyConstraint = settings.ankiLimitToKnown && knownWords && knownWords.length > 0
       ? `CRITICAL CONSTRAINT: You MUST ONLY use vocabulary words from the following list for the questions and answers in ${settings.targetLanguage}. 
          You MAY use basic grammar words (articles, prepositions, pronouns, basic conjunctions, auxiliary verbs) even if they are not in the list.
@@ -171,40 +209,49 @@ export class GeminiEngine {
     ${vocabularyConstraint}
     Return as a JSON array of objects: { "question": "...", "answer": "...", "explanation": "..." }`;
 
-    const request = {
-      model: settings.aiModel || "gemini-3-flash-preview",
-      contents: prompt,
-      config: {
+    const request: any = { model };
+
+    if (isGemma) {
+      request.contents = prompt;
+    } else {
+      request.contents = prompt;
+      request.config = {
         responseMimeType: "application/json"
-      }
-    };
+      };
+    }
 
     const response = await this.ai.models.generateContent(request);
     const usage = response.usageMetadata?.totalTokenCount || 
                   Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
     this.trackUsage(usage, request);
 
-    return JSON.parse(response.text);
+    return this.parseJson(response.text || "");
   }
 
   async checkWriting(settings: UserSettings, text: string) {
+    const model = settings.aiModel || "gemini-3-flash-preview";
+    const isGemma = model.toLowerCase().includes('gemma');
+
     const prompt = `Check the following text in ${settings.targetLanguage}: "${text}". 
     Provide a correction and explanation for each sentence if needed.
     Return as JSON: { "sentences": [ { "original": "...", "corrected": "...", "explanation": "..." } ] }`;
 
-    const request = {
-      model: settings.aiModel || "gemini-3-flash-preview",
-      contents: prompt,
-      config: {
+    const request: any = { model };
+
+    if (isGemma) {
+      request.contents = prompt;
+    } else {
+      request.contents = prompt;
+      request.config = {
         responseMimeType: "application/json"
-      }
-    };
+      };
+    }
 
     const response = await this.ai.models.generateContent(request);
     const usage = response.usageMetadata?.totalTokenCount || 
                   Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
     this.trackUsage(usage, request);
 
-    return JSON.parse(response.text);
+    return this.parseJson(response.text || "");
   }
 }
