@@ -4,7 +4,7 @@ import { UserSettings, Message } from "../types";
 export interface TokenUsage {
   totalTokens: number;
   lastRequest: any;
-  history: { tokens: number; timestamp: number }[];
+  history: { tokens: number; timestamp: number; latency: number; request: any }[];
 }
 
 export class GeminiEngine {
@@ -19,10 +19,10 @@ export class GeminiEngine {
     this.ai = new GoogleGenAI({ apiKey });
   }
 
-  private trackUsage(tokens: number, request: any) {
+  private trackUsage(tokens: number, request: any, latency: number) {
     this.usage.totalTokens += tokens;
     this.usage.lastRequest = request;
-    this.usage.history.push({ tokens, timestamp: Date.now() });
+    this.usage.history.push({ tokens, timestamp: Date.now(), latency, request });
     
     // Keep only last 60 minutes of history for TPM calculation
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
@@ -105,13 +105,15 @@ export class GeminiEngine {
       };
     }
 
+    const startTime = Date.now();
     const response = await this.ai.models.generateContent(request);
+    const latency = Date.now() - startTime;
 
     // Estimate tokens if usageMetadata is missing
     const usage = response.usageMetadata?.totalTokenCount || 
                   Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
     
-    this.trackUsage(usage, request);
+    this.trackUsage(usage, request, latency);
 
     try {
       const data = this.parseJson(response.text || "");
@@ -154,10 +156,12 @@ export class GeminiEngine {
       request.config = { responseMimeType: "application/json" };
     }
 
+    const startTime = Date.now();
     const response = await this.ai.models.generateContent(request);
+    const latency = Date.now() - startTime;
     const usage = response.usageMetadata?.totalTokenCount || 
                   Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
-    this.trackUsage(usage, request);
+    this.trackUsage(usage, request, latency);
     return this.parseJson(response.text || "");
   }
 
@@ -178,10 +182,12 @@ export class GeminiEngine {
       request.config = { responseMimeType: "application/json" };
     }
 
+    const startTime = Date.now();
     const response = await this.ai.models.generateContent(request);
+    const latency = Date.now() - startTime;
     const usage = response.usageMetadata?.totalTokenCount || 
                   Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
-    this.trackUsage(usage, request);
+    this.trackUsage(usage, request, latency);
     return this.parseJson(response.text || "");
   }
 
@@ -220,10 +226,12 @@ export class GeminiEngine {
       };
     }
 
+    const startTime = Date.now();
     const response = await this.ai.models.generateContent(request);
+    const latency = Date.now() - startTime;
     const usage = response.usageMetadata?.totalTokenCount || 
                   Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
-    this.trackUsage(usage, request);
+    this.trackUsage(usage, request, latency);
 
     return this.parseJson(response.text || "");
   }
@@ -247,10 +255,12 @@ export class GeminiEngine {
       };
     }
 
+    const startTime = Date.now();
     const response = await this.ai.models.generateContent(request);
+    const latency = Date.now() - startTime;
     const usage = response.usageMetadata?.totalTokenCount || 
                   Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
-    this.trackUsage(usage, request);
+    this.trackUsage(usage, request, latency);
 
     return this.parseJson(response.text || "");
   }

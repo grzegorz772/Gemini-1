@@ -27,8 +27,6 @@ import { BottomNav } from './components/BottomNav';
 import { UserSettings, Message, AnkiWord, SelectedTopic, GrammarSubsection } from './types';
 import { GeminiEngine } from './services/GeminiEngine';
 import { AnkiService } from './services/AnkiService';
-import { GrammarTree } from './components/GrammarTree';
-import { GERMAN_GRAMMAR, SPANISH_GRAMMAR, ENGLISH_GRAMMAR } from './data/grammar';
 
 const DEFAULT_SETTINGS: UserSettings = {
   name: 'Użytkownik',
@@ -274,7 +272,15 @@ export default function App() {
   const [isSyncingAnki, setIsSyncingAnki] = useState(false);
   const [availableDecks, setAvailableDecks] = useState<string[]>([]);
   const [availableFields, setAvailableFields] = useState<string[]>([]);
+  const [customTopics, setCustomTopics] = useState<string[]>(() => {
+    const saved = localStorage.getItem('lingu_custom_topics');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [selectedTopics, setSelectedTopics] = useState<SelectedTopic[]>([]);
+  useEffect(() => {
+    localStorage.setItem('lingu_custom_topics', JSON.stringify(customTopics));
+  }, [customTopics]);
+
   const [showTokenModal, setShowTokenModal] = useState(false);
   const [tokenStats, setTokenStats] = useState({ total: 0, tpm: 0 });
 
@@ -628,20 +634,20 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
               </div>
 
               {showChatOptions && (
-                <GlassCard className="mb-6 p-4 flex gap-4">
+                <GlassCard className="mb-6 p-2 flex gap-2 justify-center items-center">
                   <button 
                     onClick={() => setChatMode('dialogue')}
-                    className={`flex-1 p-4 rounded-2xl border transition-all ${chatMode === 'dialogue' ? 'bg-blue-500/20 border-blue-500/50' : 'border-white/10'}`}
+                    className={`flex-1 p-3 rounded-2xl border transition-all flex flex-col items-center justify-center ${chatMode === 'dialogue' ? 'bg-blue-500/20 border-blue-500/50' : 'border-white/10 hover:bg-white/5'}`}
                   >
-                    <MessageSquare className="mx-auto mb-2" />
-                    <span className="text-xs font-bold">Dialog</span>
+                    <MessageSquare className="mb-1" size={20} />
+                    <span className="text-[10px] font-bold uppercase tracking-wider">Dialog</span>
                   </button>
                   <button 
                     onClick={() => setChatMode('narrative')}
-                    className={`flex-1 p-4 rounded-2xl border transition-all ${chatMode === 'narrative' ? 'bg-purple-500/20 border-purple-500/50' : 'border-white/10'}`}
+                    className={`flex-1 p-3 rounded-2xl border transition-all flex flex-col items-center justify-center ${chatMode === 'narrative' ? 'bg-purple-500/20 border-purple-500/50' : 'border-white/10 hover:bg-white/5'}`}
                   >
-                    <Gamepad2 className="mx-auto mb-2" />
-                    <span className="text-xs font-bold">Narracja</span>
+                    <Gamepad2 className="mb-1" size={20} />
+                    <span className="text-[10px] font-bold uppercase tracking-wider">Narracja</span>
                   </button>
                 </GlassCard>
               )}
@@ -849,19 +855,78 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                       </div>
                     </div>
 
-                    <GlassButton onClick={startExercises} className="w-full" disabled={!exerciseConfig.topic}>
+                    <GlassButton onClick={startExercises} className="w-full" disabled={!exerciseConfig.topic && selectedTopics.length === 0}>
                       Generuj ćwiczenia
                     </GlassButton>
                   </GlassCard>
 
                   <div className="grid gap-4">
-                    <p className="text-xs font-bold text-white/40 uppercase tracking-widest px-2">Wybierz temat z programu</p>
-                    <GrammarTree 
-                      sections={settings.targetLanguage === 'de' ? GERMAN_GRAMMAR : settings.targetLanguage === 'es' ? SPANISH_GRAMMAR : ENGLISH_GRAMMAR}
-                      cefrLevel={settings.cefrLevel}
-                      selectedTopics={selectedTopics}
-                      onToggleTopic={handleToggleTopic}
-                    />
+                    <div className="space-y-4">
+                      <p className="text-xs font-bold text-white/40 uppercase tracking-widest px-2">Własne tematy</p>
+                      <div className="flex gap-2">
+                        <input 
+                          type="text"
+                          id="new-topic-input"
+                          placeholder="Dodaj własny temat..."
+                          className="flex-1 bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:border-blue-500/50 text-sm"
+                          onKeyPress={(e) => {
+                            if (e.key === 'Enter') {
+                              const val = (e.target as HTMLInputElement).value.trim();
+                              if (val && !customTopics.includes(val)) {
+                                setCustomTopics([...customTopics, val]);
+                                (e.target as HTMLInputElement).value = '';
+                              }
+                            }
+                          }}
+                        />
+                        <GlassButton 
+                          onClick={() => {
+                            const input = document.getElementById('new-topic-input') as HTMLInputElement;
+                            const val = input.value.trim();
+                            if (val && !customTopics.includes(val)) {
+                              setCustomTopics([...customTopics, val]);
+                              input.value = '';
+                            }
+                          }}
+                          className="px-4"
+                        >
+                          <Plus size={20} />
+                        </GlassButton>
+                      </div>
+                      
+                      {customTopics.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-4">
+                          {customTopics.map((topic, i) => {
+                            const isSelected = selectedTopics.some(t => t.title === topic);
+                            return (
+                              <div key={i} className="flex items-center gap-1">
+                                <button
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      setSelectedTopics(selectedTopics.filter(t => t.title !== topic));
+                                    } else {
+                                      setSelectedTopics([...selectedTopics, { title: topic }]);
+                                    }
+                                  }}
+                                  className={`px-3 py-1.5 rounded-lg text-xs transition-all ${isSelected ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'}`}
+                                >
+                                  {topic}
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setCustomTopics(customTopics.filter(t => t !== topic));
+                                    setSelectedTopics(selectedTopics.filter(t => t.title !== topic));
+                                  }}
+                                  className="p-1.5 rounded-lg text-white/40 hover:text-red-400 hover:bg-white/10 transition-all"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -1316,13 +1381,29 @@ return await response.json();`)}
                 <div className="space-y-3">
                   <div className="flex items-center gap-2 text-white/40">
                     <Terminal size={14} />
-                    <span className="text-xs font-bold uppercase tracking-wider">Ostatnie Zapytanie API (Body)</span>
+                    <span className="text-xs font-bold uppercase tracking-wider">Historia Zapytań (Sesja)</span>
                   </div>
-                  <div className="bg-black/40 border border-white/5 rounded-2xl p-4 font-mono text-[10px] overflow-x-auto whitespace-pre custom-scrollbar text-blue-200/80 leading-relaxed">
-                    {engine.current?.usage.lastRequest ? (
-                      JSON.stringify(engine.current.usage.lastRequest, null, 2)
+                  <div className="space-y-2">
+                    {engine.current?.usage.history && engine.current.usage.history.length > 0 ? (
+                      [...engine.current.usage.history].reverse().map((h, i) => (
+                        <details key={i} className="bg-black/40 border border-white/5 rounded-xl overflow-hidden group">
+                          <summary className="p-3 cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors">
+                            <div className="flex items-center gap-3">
+                              <span className="text-[10px] text-white/40">{new Date(h.timestamp).toLocaleTimeString()}</span>
+                              <span className="text-xs font-bold text-blue-400">{h.tokens} tokenów</span>
+                              {h.latency && <span className="text-[10px] text-white/60">{h.latency}ms</span>}
+                            </div>
+                            <ChevronRight size={14} className="text-white/40 group-open:rotate-90 transition-transform" />
+                          </summary>
+                          <div className="p-4 border-t border-white/5 font-mono text-[10px] overflow-x-auto whitespace-pre custom-scrollbar text-blue-200/80 leading-relaxed">
+                            {JSON.stringify(h.request, null, 2)}
+                          </div>
+                        </details>
+                      ))
                     ) : (
-                      <span className="italic text-white/20">Brak wysłanych zapytań w tej sesji.</span>
+                      <div className="bg-black/40 border border-white/5 rounded-2xl p-4 text-center">
+                        <span className="italic text-white/20 text-xs">Brak wysłanych zapytań w tej sesji.</span>
+                      </div>
                     )}
                   </div>
                 </div>
