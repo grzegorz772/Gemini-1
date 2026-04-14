@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { UserSettings, Message } from "../types";
+import { UserSettings, Message, ChatSentence } from "../types";
 
 export interface TokenUsage {
   totalTokens: number;
@@ -8,7 +8,7 @@ export interface TokenUsage {
 }
 
 export class GeminiEngine {
-  private ai: GoogleGenAI;
+  public ai: GoogleGenAI;
   public usage: TokenUsage = {
     totalTokens: 0,
     lastRequest: null,
@@ -19,7 +19,7 @@ export class GeminiEngine {
     this.ai = new GoogleGenAI({ apiKey });
   }
 
-  private trackUsage(tokens: number, request: any, latency: number) {
+  public trackUsage(tokens: number, request: any, latency: number) {
     this.usage.totalTokens += tokens;
     this.usage.lastRequest = request;
     this.usage.history.push({ tokens, timestamp: Date.now(), latency, request });
@@ -119,6 +119,7 @@ export class GeminiEngine {
       const data = this.parseJson(response.text || "");
       const fullText = data.sentences.map((s: any) => s.text).join(' ');
       return {
+        id: Date.now().toString(),
         role: 'model',
         text: fullText,
         sentences: data.sentences,
@@ -128,6 +129,7 @@ export class GeminiEngine {
       };
     } catch (e) {
       return {
+        id: Date.now().toString(),
         role: 'model',
         text: response.text || "Error",
         sentences: [{ text: response.text || "Error", translation: "Error parsing" }]
@@ -234,6 +236,78 @@ export class GeminiEngine {
     this.trackUsage(usage, request, latency);
 
     return this.parseJson(response.text || "");
+  }
+
+  async getTranslation(text: string, settings: UserSettings): Promise<ChatSentence[]> {
+    const model = settings.translationModel || settings.aiModel || "gemini-3-flash-preview";
+    const isGemma = model.toLowerCase().includes('gemma');
+    const prompt = `Translate the following sentences from ${settings.targetLanguage} to ${settings.nativeLanguage}.
+    TEXT: "${text}"
+    Return JSON: { "sentences": [ { "text": "original sentence", "translation": "translated sentence" } ] }`;
+
+    const request: any = { model };
+    if (isGemma) {
+      request.contents = prompt;
+    } else {
+      request.contents = prompt;
+      request.config = { responseMimeType: "application/json" };
+    }
+
+    const startTime = Date.now();
+    const response = await this.ai.models.generateContent(request);
+    const latency = Date.now() - startTime;
+    const usage = response.usageMetadata?.totalTokenCount || 
+                  Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
+    this.trackUsage(usage, request, latency);
+    const data = this.parseJson(response.text || "");
+    return data.sentences;
+  }
+
+  async getCorrection(userText: string, settings: UserSettings): Promise<{ correctedSentence?: string; correction?: string; explanation?: string }> {
+    const model = settings.correctionModel || settings.aiModel || "gemini-3-flash-preview";
+    const isGemma = model.toLowerCase().includes('gemma');
+    const prompt = `Check the following text in ${settings.targetLanguage} for mistakes: "${userText}".
+    If there are mistakes, provide a corrected version and a brief explanation in ${settings.nativeLanguage}.
+    Return JSON: { "correctedSentence": "...", "correction": "...", "explanation": "..." }
+    If no mistakes, return empty strings for these fields.`;
+
+    const request: any = { model };
+    if (isGemma) {
+      request.contents = prompt;
+    } else {
+      request.contents = prompt;
+      request.config = { responseMimeType: "application/json" };
+    }
+
+    const startTime = Date.now();
+    const response = await this.ai.models.generateContent(request);
+    const latency = Date.now() - startTime;
+    const usage = response.usageMetadata?.totalTokenCount || 
+                  Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
+    this.trackUsage(usage, request, latency);
+    return this.parseJson(response.text || "");
+  }
+
+  async getDetailedExplanation(correction: string, original: string, corrected: string, settings: UserSettings): Promise<string> {
+    const model = settings.aiModel || "gemini-3-flash-preview";
+    const prompt = `Explain in detail the grammatical mistakes made in this sentence.
+    Original: "${original}"
+    Corrected: "${corrected}"
+    Brief Correction: "${correction}"
+    Explain clearly in ${settings.nativeLanguage} why these changes were made and what the grammar rules are.`;
+
+    const request: any = { 
+      model,
+      contents: prompt
+    };
+
+    const startTime = Date.now();
+    const response = await this.ai.models.generateContent(request);
+    const latency = Date.now() - startTime;
+    const usage = response.usageMetadata?.totalTokenCount || 
+                  Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
+    this.trackUsage(usage, request, latency);
+    return response.text || "Brak szczegółowego wyjaśnienia.";
   }
 
   async checkWriting(settings: UserSettings, text: string) {

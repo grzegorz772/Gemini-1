@@ -24,6 +24,9 @@ export interface UserSettings {
   ankiFilterDays: number;
   ankiFilterStatus: 'all' | 'learned' | 'reviewed';
   aiModel: string;
+  useParallelAI: boolean;
+  translationModel: string;
+  correctionModel: string;
 }
 
 export interface GrammarSubsection {
@@ -46,12 +49,16 @@ export interface ChatSentence {
 }
 
 export interface Message {
+  id: string;
   role: 'user' | 'model';
   text: string; // Full text for user, or combined for model
   sentences?: ChatSentence[]; // For model responses
   correction?: string;
   correctedSentence?: string;
   explanation?: string;
+  isPendingTranslation?: boolean;
+  isPendingCorrection?: boolean;
+  detailedExplanation?: string;
 }
 
 export interface AnkiWord {

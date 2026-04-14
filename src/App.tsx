@@ -46,9 +46,16 @@ const DEFAULT_SETTINGS: UserSettings = {
   ankiFilterDays: 30,
   ankiFilterStatus: 'all',
   aiModel: 'gemini-3-flash-preview',
+  useParallelAI: true,
+  translationModel: 'gemini-3-flash-preview',
+  correctionModel: 'gemini-3-flash-preview',
 };
 
-const ChatMessage: React.FC<{ message: Message; settings: UserSettings }> = ({ message, settings }) => {
+const ChatMessage: React.FC<{ 
+  message: Message; 
+  settings: UserSettings;
+  onExplainMore?: (message: Message) => void;
+}> = ({ message, settings, onExplainMore }) => {
   const [activeSentenceIndex, setActiveSentenceIndex] = useState<number | null>(null);
   const isModel = message.role === 'model';
 
@@ -80,6 +87,13 @@ const ChatMessage: React.FC<{ message: Message; settings: UserSettings }> = ({ m
                 </span>
               ))}
             </div>
+          ) : isModel && message.isPendingTranslation ? (
+            <div className="flex gap-1 items-center py-1">
+              <div className="w-1.5 h-1.5 bg-white/40 rounded-full animate-bounce" />
+              <div className="w-1.5 h-1.5 bg-white/40 rounded-full animate-bounce [animation-delay:0.2s]" />
+              <div className="w-1.5 h-1.5 bg-white/40 rounded-full animate-bounce [animation-delay:0.4s]" />
+              <span className="text-[10px] text-white/40 ml-2 uppercase tracking-widest">Tłumaczenie...</span>
+            </div>
           ) : (
             <p className="text-[15px] leading-relaxed font-medium">{message.text}</p>
           )}
@@ -99,29 +113,49 @@ const ChatMessage: React.FC<{ message: Message; settings: UserSettings }> = ({ m
           </AnimatePresence>
         </motion.div>
 
-        {isModel && (message.correctedSentence || message.correction || message.explanation) && (
+        {isModel && (message.isPendingCorrection || message.correctedSentence || message.correction || message.explanation) && (
           <motion.div
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-xl space-y-2"
           >
-            {message.correctedSentence && (
-              <div className="flex items-start gap-2 text-blue-300">
-                <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
-                <p className="text-xs font-bold">Poprawione zdanie: <span className="font-normal italic text-white/90">{message.correctedSentence}</span></p>
+            {message.isPendingCorrection ? (
+              <div className="flex items-center gap-2 text-amber-500/60">
+                <RefreshCw size={12} className="animate-spin" />
+                <span className="text-[10px] uppercase tracking-widest font-bold">Sprawdzanie błędów...</span>
               </div>
-            )}
-            {message.correction && (
-              <div className="flex items-start gap-2 text-amber-200">
-                <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                <p className="text-xs font-bold">Błędy: <span className="font-normal italic">{message.correction}</span></p>
-              </div>
-            )}
-            {message.explanation && (
-              <div className="flex items-start gap-2 text-white/60">
-                <div className="w-[14px] h-[14px] shrink-0" />
-                <p className="text-[10px] leading-relaxed">{message.explanation}</p>
-              </div>
+            ) : (
+              <>
+                {message.correctedSentence && (
+                  <div className="flex items-start gap-2 text-blue-300">
+                    <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
+                    <p className="text-xs font-bold">Poprawione zdanie: <span className="font-normal italic text-white/90">{message.correctedSentence}</span></p>
+                  </div>
+                )}
+                {message.correction && (
+                  <div className="flex items-start gap-2 text-amber-200">
+                    <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                    <p className="text-xs font-bold">Błędy: <span className="font-normal italic">{message.correction}</span></p>
+                  </div>
+                )}
+                {message.explanation && (
+                  <div className="flex items-start gap-2 text-white/60">
+                    <div className="w-[14px] h-[14px] shrink-0" />
+                    <p className="text-[10px] leading-relaxed">{message.explanation}</p>
+                  </div>
+                )}
+                {(message.correction || message.explanation) && onExplainMore && (
+                  <div className="pt-1 flex justify-end">
+                    <button 
+                      onClick={() => onExplainMore(message)}
+                      className="text-[9px] font-bold text-blue-400 hover:text-blue-300 transition-colors uppercase tracking-widest flex items-center gap-1"
+                    >
+                      Wyjaśnij jaśniej
+                      <ChevronRight size={10} />
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </motion.div>
         )}
@@ -282,6 +316,12 @@ export default function App() {
   }, [customTopics]);
 
   const [showTokenModal, setShowTokenModal] = useState(false);
+  const [showExplanationModal, setShowExplanationModal] = useState(false);
+  const [activeExplanation, setActiveExplanation] = useState<{
+    message: Message;
+    explanation: string;
+    isLoading: boolean;
+  } | null>(null);
   const [tokenStats, setTokenStats] = useState({ total: 0, tpm: 0 });
 
   const [customCode, setCustomCode] = useState(`// Możesz używać: ankiData, settings, knownWords
@@ -370,24 +410,109 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
   const handleSendMessage = async () => {
     if (!inputText.trim() || !engine.current) return;
 
-    const userMsg: Message = { role: 'user', text: inputText };
+    const userMsgId = Date.now().toString();
+    const userMsg: Message = { id: userMsgId, role: 'user', text: inputText };
     setMessages(prev => [...prev, userMsg]);
     setInputText('');
     setIsTyping(true);
 
     try {
-      const response = await engine.current.chat(
-        messages, 
-        inputText, 
-        settings, 
-        chatMode,
-        settings.ankiLimitToKnown ? filteredWordsList.map(w => w.word) : undefined
-      );
-      setMessages(prev => [...prev, response]);
+      if (settings.useParallelAI) {
+        // Step 1: Get the response in target language first
+        const model = settings.aiModel || "gemini-3-flash-preview";
+        const isGemma = model.toLowerCase().includes('gemma');
+        
+        // Custom prompt for just the response
+        const prompt = `You are a language learning assistant. 
+        Native Language: ${settings.nativeLanguage}
+        Target Language: ${settings.targetLanguage}
+        CEFR Level: ${settings.cefrLevel}
+        Mode: ${chatMode === 'dialogue' ? 'Casual Dialogue' : 'Text Adventure Narrator'}
+        
+        Respond ONLY with the next part of the conversation in ${settings.targetLanguage}. 
+        Do not provide translations or corrections yet. 
+        Keep it engaging and appropriate for ${settings.cefrLevel} level.`;
+
+        const request: any = { 
+          model,
+          contents: messages.map(m => ({ role: m.role, parts: [{ text: m.text }] }))
+        };
+        request.contents.push({ role: 'user', parts: [{ text: inputText }] });
+
+        const startTime = Date.now();
+        const response = await engine.current['ai'].models.generateContent(request);
+        const latency = Date.now() - startTime;
+        const usage = response.usageMetadata?.totalTokenCount || 
+                      Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
+        engine.current['trackUsage'](usage, request, latency);
+
+        const aiText = response.text || "Error";
+        const aiMsgId = (Date.now() + 1).toString();
+        const aiMsg: Message = { 
+          id: aiMsgId, 
+          role: 'model', 
+          text: aiText,
+          isPendingTranslation: true,
+          isPendingCorrection: true
+        };
+        
+        setMessages(prev => [...prev, aiMsg]);
+        setIsTyping(false);
+
+        // Step 2 & 3: Parallel translation and correction
+        const translationPromise = engine.current.getTranslation(aiText, settings);
+        const correctionPromise = engine.current.getCorrection(inputText, settings);
+
+        translationPromise.then(sentences => {
+          setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, sentences, isPendingTranslation: false } : m));
+        }).catch(() => {
+          setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, isPendingTranslation: false } : m));
+        });
+
+        correctionPromise.then(correctionData => {
+          setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, ...correctionData, isPendingCorrection: false } : m));
+        }).catch(() => {
+          setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, isPendingCorrection: false } : m));
+        });
+
+      } else {
+        const response = await engine.current.chat(
+          messages, 
+          inputText, 
+          settings, 
+          chatMode,
+          settings.ankiLimitToKnown ? filteredWordsList.map(w => w.word) : undefined
+        );
+        const aiMsg = { ...response, id: Date.now().toString() };
+        setMessages(prev => [...prev, aiMsg]);
+        setIsTyping(false);
+      }
     } catch (error) {
       console.error(error);
-    } finally {
       setIsTyping(false);
+    }
+  };
+
+  const handleExplainMore = async (message: Message) => {
+    if (!engine.current || !message.correction) return;
+    
+    setActiveExplanation({
+      message,
+      explanation: '',
+      isLoading: true
+    });
+    setShowExplanationModal(true);
+
+    try {
+      const detailed = await engine.current.getDetailedExplanation(
+        message.correction,
+        messages.find(m => m.id === (parseInt(message.id) - 1).toString())?.text || '',
+        message.correctedSentence || '',
+        settings
+      );
+      setActiveExplanation(prev => prev ? { ...prev, explanation: detailed, isLoading: false } : null);
+    } catch (e) {
+      setActiveExplanation(prev => prev ? { ...prev, explanation: 'Błąd podczas pobierania wyjaśnienia.', isLoading: false } : null);
     }
   };
 
@@ -660,7 +785,12 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                   </div>
                 )}
                 {messages.map((msg, i) => (
-                  <ChatMessage key={i} message={msg} settings={settings} />
+                  <ChatMessage 
+                    key={i} 
+                    message={msg} 
+                    settings={settings} 
+                    onExplainMore={handleExplainMore}
+                  />
                 ))}
                 {isTyping && (
                   <div className="flex gap-2 p-4 bg-white/5 rounded-2xl w-fit animate-pulse">
@@ -1014,8 +1144,21 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
               <GlassCard className="p-6 space-y-6">
                 <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">Model AI</h3>
                 <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <span className="text-sm text-white/60 block">Równoległe zapytania AI</span>
+                      <p className="text-[10px] text-white/40 italic">Osobne modele dla odpowiedzi, tłumaczenia i poprawek</p>
+                    </div>
+                    <input 
+                      type="checkbox" 
+                      checked={settings.useParallelAI}
+                      onChange={(e) => setSettings({...settings, useParallelAI: e.target.checked})}
+                      className="w-5 h-5 accent-blue-500"
+                    />
+                  </div>
+
                   <div className="space-y-2">
-                    <label className="text-xs font-medium text-white/60">Wybierz model</label>
+                    <label className="text-xs font-medium text-white/60">Główny model (Odpowiedź)</label>
                     <select 
                       value={['gemini-3-flash-preview', 'gemini-3.1-pro-preview', 'gemma-2-27b-it'].includes(settings.aiModel) ? settings.aiModel : 'custom'}
                       onChange={(e) => {
@@ -1035,15 +1178,83 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                   </div>
                   {(!['gemini-3-flash-preview', 'gemini-3.1-pro-preview', 'gemma-2-27b-it'].includes(settings.aiModel) || settings.aiModel === 'custom') && (
                     <div className="space-y-2">
-                      <label className="text-xs font-medium text-white/60">Nazwa modelu Google</label>
+                      <label className="text-xs font-medium text-white/60">Nazwa głównego modelu</label>
                       <input 
                         type="text"
-                        value={settings.aiModel === 'custom' ? '' : settings.aiModel}
+                        value={settings.aiModel}
                         onChange={(e) => setSettings({...settings, aiModel: e.target.value})}
                         placeholder="np. gemini-1.5-pro-latest"
                         className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:border-blue-500/50"
                       />
                     </div>
+                  )}
+
+                  {settings.useParallelAI && (
+                    <>
+                      <div className="space-y-2">
+                        <label className="text-xs font-medium text-white/60">Model do tłumaczeń</label>
+                        <select 
+                          value={['gemini-3-flash-preview', 'gemini-3.1-pro-preview', 'gemma-2-27b-it'].includes(settings.translationModel) ? settings.translationModel : 'custom'}
+                          onChange={(e) => {
+                            if (e.target.value === 'custom') {
+                              setSettings({...settings, translationModel: ''});
+                            } else {
+                              setSettings({...settings, translationModel: e.target.value});
+                            }
+                          }}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none"
+                        >
+                          <option value="gemini-3-flash-preview">Gemini 3 Flash</option>
+                          <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
+                          <option value="gemma-2-27b-it">Gemma 2 27B</option>
+                          <option value="custom">Własny model / Inny...</option>
+                        </select>
+                      </div>
+                      {(!['gemini-3-flash-preview', 'gemini-3.1-pro-preview', 'gemma-2-27b-it'].includes(settings.translationModel) || settings.translationModel === 'custom') && (
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-white/60">Nazwa modelu do tłumaczeń</label>
+                          <input 
+                            type="text"
+                            value={settings.translationModel}
+                            onChange={(e) => setSettings({...settings, translationModel: e.target.value})}
+                            placeholder="np. gemini-1.5-flash"
+                            className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:border-blue-500/50"
+                          />
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        <label className="text-xs font-medium text-white/60">Model do poprawek</label>
+                        <select 
+                          value={['gemini-3-flash-preview', 'gemini-3.1-pro-preview', 'gemma-2-27b-it'].includes(settings.correctionModel) ? settings.correctionModel : 'custom'}
+                          onChange={(e) => {
+                            if (e.target.value === 'custom') {
+                              setSettings({...settings, correctionModel: ''});
+                            } else {
+                              setSettings({...settings, correctionModel: e.target.value});
+                            }
+                          }}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none"
+                        >
+                          <option value="gemini-3-flash-preview">Gemini 3 Flash</option>
+                          <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
+                          <option value="gemma-2-27b-it">Gemma 2 27B</option>
+                          <option value="custom">Własny model / Inny...</option>
+                        </select>
+                      </div>
+                      {(!['gemini-3-flash-preview', 'gemini-3.1-pro-preview', 'gemma-2-27b-it'].includes(settings.correctionModel) || settings.correctionModel === 'custom') && (
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-white/60">Nazwa modelu do poprawek</label>
+                          <input 
+                            type="text"
+                            value={settings.correctionModel}
+                            onChange={(e) => setSettings({...settings, correctionModel: e.target.value})}
+                            placeholder="np. gemini-1.5-pro"
+                            className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:border-blue-500/50"
+                          />
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </GlassCard>
@@ -1328,6 +1539,85 @@ return await response.json();`)}
           )}
         </AnimatePresence>
       </main>
+
+      <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
+
+      {/* Detailed Explanation Modal */}
+      <AnimatePresence>
+        {showExplanationModal && activeExplanation && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+            onClick={() => setShowExplanationModal(false)}
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-[#1a1a1a] border border-white/10 rounded-3xl w-full max-w-xl max-h-[80vh] overflow-hidden flex flex-col shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/5">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-amber-500/20 rounded-lg">
+                    <BookOpen size={20} className="text-amber-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold">Szczegółowe Wyjaśnienie</h2>
+                    <p className="text-xs text-white/40">Analiza gramatyczna Twojego błędu</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowExplanationModal(false)}
+                  className="p-2 hover:bg-white/5 rounded-full transition-colors"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+                <div className="space-y-4">
+                  <div className="p-4 bg-red-500/5 border border-red-500/20 rounded-2xl">
+                    <span className="text-[10px] font-bold text-red-400 uppercase tracking-wider block mb-1">Twoje zdanie:</span>
+                    <p className="text-sm italic text-white/80">"{messages.find(m => m.id === (parseInt(activeExplanation.message.id) - 1).toString())?.text}"</p>
+                  </div>
+                  <div className="p-4 bg-green-500/5 border border-green-500/20 rounded-2xl">
+                    <span className="text-[10px] font-bold text-green-400 uppercase tracking-wider block mb-1">Poprawna wersja:</span>
+                    <p className="text-sm font-bold text-white">"{activeExplanation.message.correctedSentence}"</p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <span className="text-xs font-bold text-white/40 uppercase tracking-wider">Analiza AI:</span>
+                  {activeExplanation.isLoading ? (
+                    <div className="flex flex-col items-center justify-center py-10 gap-4">
+                      <RefreshCw size={32} className="animate-spin text-blue-400" />
+                      <p className="text-xs text-white/40 animate-pulse">Przygotowywanie głębokiej analizy...</p>
+                    </div>
+                  ) : (
+                    <div className="prose prose-invert prose-sm max-w-none text-white/80 leading-relaxed">
+                      {activeExplanation.explanation.split('\n').map((line, i) => (
+                        <p key={i}>{line}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-4 bg-white/5 border-t border-white/5 flex justify-end">
+                <button 
+                  onClick={() => setShowExplanationModal(false)}
+                  className="px-6 py-2 bg-blue-500 hover:bg-blue-600 rounded-xl text-xs font-bold transition-all shadow-lg shadow-blue-500/20"
+                >
+                  Rozumiem
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
 
