@@ -17,7 +17,7 @@ export const GlassCard: React.FC<GlassCardProps> = ({ children, className = "", 
       className={`liquidGlass-wrapper ${radiusClass} ${className}`}
     >
       <div className={`liquidGlass-effect ${radiusClass}`}></div>
-      <div className={`liquidGlass-tint ${radiusClass} bg-white/10`}></div>
+      <div className={`liquidGlass-tint ${radiusClass} bg-gradient-to-br from-white/10 to-white/5`}></div>
       <div className={`liquidGlass-shine ${radiusClass}`}></div>
       <div className="liquidGlass-text w-full">
         {children}
@@ -46,7 +46,11 @@ export const GlassButton: React.FC<{
       `}
     >
       <div className="liquidGlass-effect rounded-2xl"></div>
-      <div className={`liquidGlass-tint rounded-2xl ${variant === 'primary' ? 'bg-blue-500/30' : variant === 'secondary' ? 'bg-white/30' : 'bg-transparent'}`}></div>
+      <div className={`liquidGlass-tint rounded-2xl ${
+        variant === 'primary' ? 'bg-gradient-to-br from-blue-500/40 to-blue-600/20' : 
+        variant === 'secondary' ? 'bg-gradient-to-br from-white/20 to-white/5' : 
+        'bg-transparent'
+      }`}></div>
       <div className="liquidGlass-shine rounded-2xl"></div>
       <div className="liquidGlass-text px-6 py-3 font-medium flex items-center justify-center">
         {children}
