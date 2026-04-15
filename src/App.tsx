@@ -177,6 +177,7 @@ export default function App() {
   const [isTyping, setIsTyping] = useState(false);
   const [chatMode, setChatMode] = useState<'dialogue' | 'narrative'>('dialogue');
   const [showChatOptions, setShowChatOptions] = useState(false);
+  const [isInputFocused, setIsInputFocused] = useState(false);
   const [knownWords, setKnownWords] = useState<AnkiWord[]>([]);
   const [ankiApkgData, setAnkiApkgData] = useState<{
     decks: Record<string, { id: string, name: string }>,
@@ -732,7 +733,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
         <div className="absolute top-[20%] right-[10%] w-[30%] h-[30%] bg-cyan-500/10 blur-[100px] rounded-full" />
       </div>
 
-      <main className="flex-1 relative z-10 overflow-hidden pt-6 px-4 sm:px-6 flex flex-col">
+      <main className="flex-1 relative z-10 overflow-hidden pt-6 pb-8 px-4 sm:px-6 flex flex-col">
         <div className="w-full max-w-2xl mx-auto flex-1 flex flex-col min-h-0">
           <AnimatePresence mode="wait">
             {activeTab === 'chat' && (
@@ -821,6 +822,8 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                   type="text"
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
+                  onFocus={() => setIsInputFocused(true)}
+                  onBlur={() => setIsInputFocused(false)}
                   onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                   placeholder="Napisz coś..."
                   className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-6 pr-16 focus:outline-none focus:border-blue-500/50 backdrop-blur-xl transition-all"
@@ -845,22 +848,23 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
             >
               <div className="flex justify-between items-center shrink-0">
                 <h1 className="text-3xl font-bold">Tryb Pisania</h1>
-                <GlassButton variant="secondary" onClick={generateNewTopic} disabled={isGeneratingTopic}>
-                  {isGeneratingTopic ? <RefreshCw className="animate-spin" size={18} /> : 'Losuj tematy'}
-                </GlassButton>
               </div>
 
               {!writingTopic && writingTopicOptions.length === 0 && (
-                <GlassCard className="p-12 flex flex-col items-center justify-center text-center space-y-4 flex-1">
-                  <BookOpen size={48} className="text-blue-400 opacity-50" />
-                  <div>
-                    <h3 className="text-xl font-bold mb-2">Gotowy na pisanie?</h3>
-                    <p className="text-white/60">Kliknij "Losuj tematy", aby otrzymać 3 propozycje dopasowane do Twojego poziomu.</p>
-                  </div>
-                  <GlassButton onClick={generateNewTopic} disabled={isGeneratingTopic} className="mt-4">
-                    {isGeneratingTopic ? <RefreshCw className="animate-spin" size={18} /> : 'Losuj tematy'}
-                  </GlassButton>
-                </GlassCard>
+                <div className="flex-1 flex flex-col items-center justify-center">
+                  <GlassCard className="p-12 flex flex-col items-center justify-center text-center space-y-6 w-full max-w-lg">
+                    <div className="p-4 bg-blue-500/20 rounded-[2rem]">
+                      <BookOpen size={48} className="text-blue-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-bold mb-2">Gotowy na pisanie?</h3>
+                      <p className="text-white/60">Kliknij poniżej, aby otrzymać 3 propozycje tematów dopasowane do Twojego poziomu.</p>
+                    </div>
+                    <GlassButton onClick={generateNewTopic} disabled={isGeneratingTopic} className="mt-4 px-10 py-4 text-lg">
+                      {isGeneratingTopic ? <RefreshCw className="animate-spin" size={24} /> : 'Losuj tematy'}
+                    </GlassButton>
+                  </GlassCard>
+                </div>
               )}
 
               {!writingTopic && writingTopicOptions.length > 0 && (
@@ -904,6 +908,8 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                     <textarea
                       value={writingText}
                       onChange={handleWritingChange}
+                      onFocus={() => setIsInputFocused(true)}
+                      onBlur={() => setIsInputFocused(false)}
                       className="w-full flex-1 bg-black/20 border border-white/10 rounded-2xl p-6 focus:outline-none focus:border-blue-500/50 transition-all resize-none"
                       placeholder="Zacznij pisać wypracowanie. Po każdej kropce AI sprawdzi Twoje zdanie..."
                     />
@@ -980,6 +986,8 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                           type="text"
                           value={userAnswer}
                           onChange={(e) => setUserAnswer(e.target.value)}
+                          onFocus={() => setIsInputFocused(true)}
+                          onBlur={() => setIsInputFocused(false)}
                           placeholder="Twoja odpowiedź..."
                           className="w-full bg-white/5 border border-white/10 rounded-xl p-4 outline-none focus:border-blue-500/50"
                         />
@@ -1006,49 +1014,57 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                 </div>
               ) : (
                 <div className="space-y-6">
-                  <GlassCard className="p-6 space-y-6">
+                  <GlassCard className="p-8 space-y-8">
                     <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">Konfiguracja Ćwiczeń</h3>
                     
-                    <div className="space-y-2">
-                      <label className="text-xs font-medium text-white/60">Temat gramatyczny</label>
-                      <input 
-                        type="text"
-                        value={exerciseConfig.topic}
-                        onChange={(e) => setExerciseConfig({...exerciseConfig, topic: e.target.value})}
-                        placeholder="np. Present Simple, Passive Voice..."
-                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:border-blue-500/50"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-4">
                       <div className="space-y-2">
-                        <label className="text-xs font-medium text-white/60">Typ zadania</label>
-                        <select 
-                          value={exerciseConfig.type}
-                          onChange={(e) => setExerciseConfig({...exerciseConfig, type: e.target.value})}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none"
-                        >
-                          <option value="fill in the blank">Luki</option>
-                          <option value="sentence transformation">Transformacja</option>
-                          <option value="translation">Tłumaczenie</option>
-                          <option value="error correction">Poprawa błędów</option>
-                          <option value="reorder sentence">Kolejność</option>
-                        </select>
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-xs font-medium text-white/60">Ilość zadań</label>
+                        <label className="text-xs font-medium text-white/60">Temat gramatyczny</label>
                         <input 
-                          type="number"
-                          value={exerciseConfig.count}
-                          onChange={(e) => setExerciseConfig({...exerciseConfig, count: parseInt(e.target.value)})}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none"
+                          type="text"
+                          value={exerciseConfig.topic}
+                          onChange={(e) => setExerciseConfig({...exerciseConfig, topic: e.target.value})}
+                          onFocus={() => setIsInputFocused(true)}
+                          onBlur={() => setIsInputFocused(false)}
+                          placeholder="np. Present Simple, Passive Voice..."
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:border-blue-500/50"
                         />
                       </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-white/60">Typ zadania</label>
+                          <select 
+                            value={exerciseConfig.type}
+                            onChange={(e) => setExerciseConfig({...exerciseConfig, type: e.target.value})}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none"
+                          >
+                            <option value="fill in the blank">Luki</option>
+                            <option value="sentence transformation">Transformacja</option>
+                            <option value="translation">Tłumaczenie</option>
+                            <option value="error correction">Poprawa błędów</option>
+                            <option value="reorder sentence">Kolejność</option>
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-white/60">Ilość zadań</label>
+                          <input 
+                            type="number"
+                            value={exerciseConfig.count}
+                            onChange={(e) => setExerciseConfig({...exerciseConfig, count: parseInt(e.target.value)})}
+                            onFocus={() => setIsInputFocused(true)}
+                            onBlur={() => setIsInputFocused(false)}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none"
+                          />
+                        </div>
+                      </div>
                     </div>
 
-                    <GlassButton onClick={startExercises} className="w-full" disabled={!exerciseConfig.topic && selectedTopics.length === 0}>
-                      Generuj ćwiczenia
-                    </GlassButton>
+                    <div className="pt-4">
+                      <GlassButton onClick={startExercises} className="w-full" disabled={!exerciseConfig.topic && selectedTopics.length === 0}>
+                        Generuj ćwiczenia
+                      </GlassButton>
+                    </div>
                   </GlassCard>
 
                   <div className="grid gap-4">
@@ -1133,56 +1149,22 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
               exit={{ opacity: 0, y: -20 }}
               className="space-y-6 flex-1 overflow-y-auto custom-scrollbar pb-10 pr-2 min-h-0"
             >
-              <div className="flex items-center gap-6 mb-8 shrink-0">
-                <div className="relative group">
-                  <img src={settings.avatar} className="w-24 h-24 rounded-[2rem] border-2 border-blue-500/50 p-1 object-cover" alt="Avatar" />
-                </div>
-                <div className="flex-1 space-y-2">
-                  <input 
-                    type="text" 
-                    value={settings.name}
-                    onChange={(e) => setSettings({...settings, name: e.target.value})}
-                    className="text-2xl font-bold bg-transparent border-b border-transparent hover:border-white/20 focus:border-blue-500 focus:outline-none w-full"
-                    placeholder="Twoje imię"
-                  />
-                  <div className="flex items-center gap-2">
-                    <span className="text-white/40 text-[10px] font-bold uppercase tracking-widest">Poziom:</span>
-                    <select 
-                      value={settings.cefrLevel}
-                      onChange={(e) => setSettings({...settings, cefrLevel: e.target.value as any})}
-                      className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-xs outline-none"
-                    >
-                      {['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map(lvl => (
-                        <option key={lvl} value={lvl}>{lvl}</option>
-                      ))}
-                    </select>
-                  </div>
+              <div className="flex flex-col items-center gap-4 mb-8 shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-white/40 text-[10px] font-bold uppercase tracking-widest">Poziom zaawansowania:</span>
+                  <select 
+                    value={settings.cefrLevel}
+                    onChange={(e) => setSettings({...settings, cefrLevel: e.target.value as any})}
+                    className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-xs outline-none"
+                  >
+                    {['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map(lvl => (
+                      <option key={lvl} value={lvl}>{lvl}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
-              <details className="group bg-white/5 border border-white/10 rounded-[2rem] overflow-hidden transition-all" open>
-                <summary className="p-6 cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-500/20 rounded-lg">
-                      <UserIcon size={20} className="text-blue-400" />
-                    </div>
-                    <h3 className="text-sm font-bold text-white/80 uppercase tracking-widest">Profil</h3>
-                  </div>
-                  <ChevronRight size={20} className="text-white/40 group-open:rotate-90 transition-transform" />
-                </summary>
-                <div className="p-6 pt-0 space-y-2 border-t border-white/5 mt-2">
-                  <label className="text-xs font-medium text-white/60">URL Avatara</label>
-                  <input 
-                    type="text"
-                    value={settings.avatar}
-                    onChange={(e) => setSettings({...settings, avatar: e.target.value})}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:border-blue-500/50 text-xs"
-                    placeholder="https://..."
-                  />
-                </div>
-              </details>
-
-              <details className="group bg-white/5 border border-white/10 rounded-[2rem] overflow-hidden transition-all" open>
+              <details className="group bg-white/5 border border-white/10 rounded-[2rem] overflow-hidden transition-all">
                 <summary className="p-6 cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-purple-500/20 rounded-lg">
@@ -1349,7 +1331,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                 </div>
               </details>
 
-              <details className="group bg-white/5 border border-white/10 rounded-[2rem] overflow-hidden transition-all" open>
+              <details className="group bg-white/5 border border-white/10 rounded-[2rem] overflow-hidden transition-all">
                 <summary className="p-6 cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-amber-500/20 rounded-lg">
@@ -1630,6 +1612,8 @@ return await response.json();`)}
                       type="password"
                       value={settings.geminiApiKey}
                       onChange={(e) => setSettings({...settings, geminiApiKey: e.target.value})}
+                      onFocus={() => setIsInputFocused(true)}
+                      onBlur={() => setIsInputFocused(false)}
                       placeholder="Wprowadź klucz API..."
                       className="w-full bg-white/5 border border-white/10 rounded-xl p-4 outline-none focus:border-blue-500/50"
                     />
@@ -1744,7 +1728,7 @@ return await response.json();`)}
         )}
       </AnimatePresence>
 
-      <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
+      {!isInputFocused && <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />}
 
       {/* Token Usage Modal */}
       <AnimatePresence>
