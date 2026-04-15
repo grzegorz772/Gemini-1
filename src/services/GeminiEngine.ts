@@ -29,6 +29,43 @@ export class GeminiEngine {
     this.usage.history = this.usage.history.filter(h => h.timestamp > oneHourAgo);
   }
 
+  async getBaseResponse(
+    history: Message[],
+    userInput: string,
+    settings: UserSettings,
+    mode: 'dialogue' | 'narrative'
+  ): Promise<string> {
+    const model = settings.aiModel || "gemini-3-flash-preview";
+    const prompt = `You are a language learning assistant. 
+    Native Language: ${settings.nativeLanguage}
+    Target Language: ${settings.targetLanguage}
+    CEFR Level: ${settings.cefrLevel}
+    Mode: ${mode === 'dialogue' ? 'Casual Dialogue' : 'Text Adventure Narrator'}
+    
+    Respond ONLY with the next part of the conversation in ${settings.targetLanguage}. 
+    Do not provide translations or corrections. 
+    Keep it engaging and appropriate for ${settings.cefrLevel} level.`;
+
+    const request: any = { 
+      model,
+      contents: history.map(m => ({
+        role: m.role,
+        parts: [{ text: m.text }]
+      }))
+    };
+    request.contents.push({ role: 'user', parts: [{ text: userInput }] });
+    request.config = { systemInstruction: prompt };
+
+    const startTime = Date.now();
+    const response = await this.ai.models.generateContent(request);
+    const latency = Date.now() - startTime;
+    const usage = response.usageMetadata?.totalTokenCount || 
+                  Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
+    
+    this.trackUsage(usage, request, latency);
+    return response.text || "Error";
+  }
+
   private parseJson(text: string): any {
     try {
       // Remove markdown code blocks if present
@@ -142,12 +179,12 @@ export class GeminiEngine {
     const isGemma = model.toLowerCase().includes('gemma');
 
     const vocabularyConstraint = settings.ankiLimitToKnown && knownWords && knownWords.length > 0
-      ? `CRITICAL CONSTRAINT: The topic and description MUST encourage using ONLY these vocabulary words: ${knownWords.join(', ')}. You may use basic grammar words.`
+      ? `CRITICAL CONSTRAINT: The topics and descriptions MUST encourage using ONLY these vocabulary words: ${knownWords.join(', ')}. You may use basic grammar words.`
       : '';
 
-    const prompt = `Generate a creative writing topic for a ${settings.targetLanguage} learner at ${settings.cefrLevel} level. 
+    const prompt = `Generate 3 different creative writing topics for a ${settings.targetLanguage} learner at ${settings.cefrLevel} level. 
     ${vocabularyConstraint}
-    Return JSON: { "topic": "Short Title", "description": "Detailed instructions in ${settings.nativeLanguage}" }`;
+    Return JSON: { "topics": [ { "topic": "Short Title 1", "description": "Detailed instructions in ${settings.nativeLanguage}" }, { "topic": "Short Title 2", "description": "..." }, { "topic": "Short Title 3", "description": "..." } ] }`;
 
     const request: any = { model };
 
@@ -164,7 +201,8 @@ export class GeminiEngine {
     const usage = response.usageMetadata?.totalTokenCount || 
                   Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
     this.trackUsage(usage, request, latency);
-    return this.parseJson(response.text || "");
+    const data = this.parseJson(response.text || "");
+    return data.topics || [];
   }
 
   async checkSentence(settings: UserSettings, sentence: string) {

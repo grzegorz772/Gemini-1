@@ -283,7 +283,8 @@ export default function App() {
   }, [settings.ankiFieldName]);
 
   const [writingText, setWritingText] = useState('');
-  const [writingTopic, setWritingTopic] = useState({ topic: 'Wybierz temat', description: 'Kliknij przycisk poniżej, aby wylosować temat.' });
+  const [writingTopicOptions, setWritingTopicOptions] = useState<{topic: string, description: string}[]>([]);
+  const [writingTopic, setWritingTopic] = useState<{topic: string, description: string} | null>(null);
   const [isGeneratingTopic, setIsGeneratingTopic] = useState(false);
   const [lastCheckedSentence, setLastCheckedSentence] = useState('');
   const [writingSentenceFeedback, setWritingSentenceFeedback] = useState<any>(null);
@@ -418,61 +419,45 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
 
     try {
       if (settings.useParallelAI) {
-        // Step 1: Get the response in target language first
-        const model = settings.aiModel || "gemini-3-flash-preview";
-        const isGemma = model.toLowerCase().includes('gemma');
-        
-        // Custom prompt for just the response
-        const prompt = `You are a language learning assistant. 
-        Native Language: ${settings.nativeLanguage}
-        Target Language: ${settings.targetLanguage}
-        CEFR Level: ${settings.cefrLevel}
-        Mode: ${chatMode === 'dialogue' ? 'Casual Dialogue' : 'Text Adventure Narrator'}
-        
-        Respond ONLY with the next part of the conversation in ${settings.targetLanguage}. 
-        Do not provide translations or corrections yet. 
-        Keep it engaging and appropriate for ${settings.cefrLevel} level.`;
-
-        const request: any = { 
-          model,
-          contents: messages.map(m => ({ role: m.role, parts: [{ text: m.text }] }))
-        };
-        request.contents.push({ role: 'user', parts: [{ text: inputText }] });
-
-        const startTime = Date.now();
-        const response = await engine.current['ai'].models.generateContent(request);
-        const latency = Date.now() - startTime;
-        const usage = response.usageMetadata?.totalTokenCount || 
-                      Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
-        engine.current['trackUsage'](usage, request, latency);
-
-        const aiText = response.text || "Error";
         const aiMsgId = (Date.now() + 1).toString();
-        const aiMsg: Message = { 
-          id: aiMsgId, 
-          role: 'model', 
-          text: aiText,
+        
+        // 1. Start Correction and Base Response in PARALLEL
+        const correctionPromise = engine.current.getCorrection(inputText, settings);
+        const baseResponsePromise = engine.current.getBaseResponse(messages, inputText, settings, chatMode);
+
+        // Add placeholder message immediately to show progress
+        const placeholderMsg: Message = {
+          id: aiMsgId,
+          role: 'model',
+          text: '',
           isPendingTranslation: true,
           isPendingCorrection: true
         };
-        
-        setMessages(prev => [...prev, aiMsg]);
+        setMessages(prev => [...prev, placeholderMsg]);
         setIsTyping(false);
 
-        // Step 2 & 3: Parallel translation and correction
-        const translationPromise = engine.current.getTranslation(aiText, settings);
-        const correctionPromise = engine.current.getCorrection(inputText, settings);
-
-        translationPromise.then(sentences => {
-          setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, sentences, isPendingTranslation: false } : m));
-        }).catch(() => {
-          setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, isPendingTranslation: false } : m));
-        });
-
+        // Handle Correction as soon as it arrives
         correctionPromise.then(correctionData => {
           setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, ...correctionData, isPendingCorrection: false } : m));
         }).catch(() => {
           setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, isPendingCorrection: false } : m));
+        });
+
+        // Handle Base Response, then trigger Translation
+        baseResponsePromise.then(async (aiText) => {
+          // Update message with the actual text
+          setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, text: aiText } : m));
+          
+          // Now start Translation (needs aiText)
+          try {
+            const sentences = await engine.current!.getTranslation(aiText, settings);
+            setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, sentences, isPendingTranslation: false } : m));
+          } catch {
+            setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, isPendingTranslation: false } : m));
+          }
+        }).catch((err) => {
+          console.error(err);
+          setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, text: "Błąd generowania odpowiedzi.", isPendingTranslation: false, isPendingCorrection: false } : m));
         });
 
       } else {
@@ -552,11 +537,12 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
     if (!engine.current) return;
     setIsGeneratingTopic(true);
     try {
-      const topic = await engine.current.generateTopic(
+      const topics = await engine.current.generateTopic(
         settings,
         settings.ankiLimitToKnown ? filteredWordsList.map(w => w.word) : undefined
       );
-      setWritingTopic(topic);
+      setWritingTopicOptions(topics);
+      setWritingTopic(null);
       setWritingText('');
       setWritingSentenceFeedback(null);
     } catch (e) {
@@ -722,7 +708,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
   };
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white font-sans selection:bg-blue-500/30 overflow-x-hidden">
+    <div className="h-[100dvh] w-full bg-[#050505] text-white font-sans selection:bg-blue-500/30 overflow-hidden flex flex-col">
       {/* Background Blobs */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-blue-600/20 blur-[120px] rounded-full animate-pulse" />
@@ -730,16 +716,17 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
         <div className="absolute top-[20%] right-[10%] w-[30%] h-[30%] bg-cyan-500/10 blur-[100px] rounded-full" />
       </div>
 
-      <main className="relative z-10 pb-32 pt-10 px-6 max-w-2xl mx-auto">
-        <AnimatePresence mode="wait">
-          {activeTab === 'chat' && (
-            <motion.div
-              key="chat"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="flex flex-col h-[80vh]"
-            >
+      <main className="flex-1 relative z-10 overflow-y-auto custom-scrollbar pb-24 pt-6 px-4 sm:px-6">
+        <div className="max-w-2xl mx-auto h-full">
+          <AnimatePresence mode="wait">
+            {activeTab === 'chat' && (
+              <motion.div
+                key="chat"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="flex flex-col h-full"
+              >
               <div className="flex justify-between items-center mb-6">
                 <div>
                   <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">
@@ -827,54 +814,99 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="space-y-6"
+              className="space-y-6 h-full flex flex-col"
             >
-              <div className="flex justify-between items-center">
+              <div className="flex justify-between items-center shrink-0">
                 <h1 className="text-3xl font-bold">Tryb Pisania</h1>
                 <GlassButton variant="secondary" onClick={generateNewTopic} disabled={isGeneratingTopic}>
-                  {isGeneratingTopic ? <RefreshCw className="animate-spin" size={18} /> : 'Losuj temat'}
+                  {isGeneratingTopic ? <RefreshCw className="animate-spin" size={18} /> : 'Losuj tematy'}
                 </GlassButton>
               </div>
 
-              <GlassCard className="p-6 space-y-4">
-                <div className="space-y-1">
-                  <h3 className="text-xl font-bold text-blue-400">{writingTopic.topic}</h3>
-                  <p className="text-sm text-white/60">{writingTopic.description}</p>
-                </div>
-                
-                <div className="relative">
-                  <textarea
-                    value={writingText}
-                    onChange={handleWritingChange}
-                    className="w-full h-64 bg-black/20 border border-white/10 rounded-2xl p-6 focus:outline-none focus:border-blue-500/50 transition-all resize-none"
-                    placeholder="Zacznij pisać wypracowanie. Po każdej kropce AI sprawdzi Twoje zdanie..."
-                  />
-                  {isCheckingSentence && (
-                    <div className="absolute bottom-4 right-4 flex items-center gap-2 text-[10px] text-white/40 uppercase tracking-widest">
-                      <RefreshCw size={12} className="animate-spin" />
-                      Sprawdzanie...
-                    </div>
-                  )}
-                </div>
+              {!writingTopic && writingTopicOptions.length === 0 && (
+                <GlassCard className="p-12 flex flex-col items-center justify-center text-center space-y-4 flex-1">
+                  <BookOpen size={48} className="text-blue-400 opacity-50" />
+                  <div>
+                    <h3 className="text-xl font-bold mb-2">Gotowy na pisanie?</h3>
+                    <p className="text-white/60">Kliknij "Losuj tematy", aby otrzymać 3 propozycje dopasowane do Twojego poziomu.</p>
+                  </div>
+                  <GlassButton onClick={generateNewTopic} disabled={isGeneratingTopic} className="mt-4">
+                    {isGeneratingTopic ? <RefreshCw className="animate-spin" size={18} /> : 'Losuj tematy'}
+                  </GlassButton>
+                </GlassCard>
+              )}
 
-                <AnimatePresence>
-                  {writingSentenceFeedback && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 10 }}
-                      className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl"
+              {!writingTopic && writingTopicOptions.length > 0 && (
+                <div className="space-y-4 flex-1 overflow-y-auto custom-scrollbar">
+                  <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest px-2">Wybierz jeden z tematów:</h3>
+                  <div className="grid gap-4 sm:grid-cols-1">
+                    {writingTopicOptions.map((opt, i) => (
+                      <GlassCard 
+                        key={i} 
+                        className="p-6 cursor-pointer hover:bg-white/10 transition-all hover:scale-[1.02] active:scale-95 flex flex-col"
+                        onClick={() => setWritingTopic(opt)}
+                      >
+                        <h4 className="text-lg font-bold text-blue-400 mb-2">{opt.topic}</h4>
+                        <p className="text-xs text-white/60 flex-1">{opt.description}</p>
+                        <div className="mt-4 text-[10px] font-bold uppercase tracking-widest text-blue-400/50 flex items-center gap-1">
+                          Wybierz <ChevronRight size={12} />
+                        </div>
+                      </GlassCard>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {writingTopic && (
+                <GlassCard className="p-6 space-y-4 flex-1 flex flex-col">
+                  <div className="flex justify-between items-start gap-4 shrink-0">
+                    <div className="space-y-1">
+                      <h3 className="text-xl font-bold text-blue-400">{writingTopic.topic}</h3>
+                      <p className="text-sm text-white/60">{writingTopic.description}</p>
+                    </div>
+                    <button 
+                      onClick={() => setWritingTopic(null)}
+                      className="p-2 bg-white/5 hover:bg-white/10 rounded-xl transition-colors text-white/60 hover:text-white shrink-0"
+                      title="Zmień temat"
                     >
-                      <div className="flex items-center gap-2 mb-2 text-amber-400">
-                        <AlertCircle size={16} />
-                        <span className="font-bold text-sm">Uwaga do ostatniego zdania:</span>
+                      <RefreshCw size={16} />
+                    </button>
+                  </div>
+                  
+                  <div className="relative flex-1 flex flex-col min-h-[200px]">
+                    <textarea
+                      value={writingText}
+                      onChange={handleWritingChange}
+                      className="w-full flex-1 bg-black/20 border border-white/10 rounded-2xl p-6 focus:outline-none focus:border-blue-500/50 transition-all resize-none"
+                      placeholder="Zacznij pisać wypracowanie. Po każdej kropce AI sprawdzi Twoje zdanie..."
+                    />
+                    {isCheckingSentence && (
+                      <div className="absolute bottom-4 right-4 flex items-center gap-2 text-[10px] text-white/40 uppercase tracking-widest">
+                        <RefreshCw size={12} className="animate-spin" />
+                        Sprawdzanie...
                       </div>
-                      <p className="text-sm mb-1">Poprawnie: <span className="text-green-400">{writingSentenceFeedback.corrected}</span></p>
-                      <p className="text-xs text-white/60">{writingSentenceFeedback.explanation}</p>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </GlassCard>
+                    )}
+                  </div>
+
+                  <AnimatePresence>
+                    {writingSentenceFeedback && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 10 }}
+                        className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl shrink-0"
+                      >
+                        <div className="flex items-center gap-2 mb-2 text-amber-400">
+                          <AlertCircle size={16} />
+                          <span className="font-bold text-sm">Uwaga do ostatniego zdania:</span>
+                        </div>
+                        <p className="text-sm mb-1">Poprawnie: <span className="text-green-400">{writingSentenceFeedback.corrected}</span></p>
+                        <p className="text-xs text-white/60">{writingSentenceFeedback.explanation}</p>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </GlassCard>
+              )}
             </motion.div>
           )}
 
@@ -1538,6 +1570,7 @@ return await response.json();`)}
             </motion.div>
           )}
         </AnimatePresence>
+        </div>
       </main>
 
       <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
