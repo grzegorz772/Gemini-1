@@ -717,8 +717,8 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
         <div className="absolute top-[20%] right-[10%] w-[30%] h-[30%] bg-cyan-500/10 blur-[100px] rounded-full" />
       </div>
 
-      <main className="flex-1 relative z-10 overflow-hidden pb-24 pt-6 px-4 sm:px-6">
-        <div className="max-w-2xl mx-auto h-full">
+      <main className="flex-1 relative z-10 overflow-hidden pb-32 pt-6 px-4 sm:px-6 flex flex-col">
+        <div className="w-full max-w-2xl mx-auto flex-1 flex flex-col min-h-0">
           <AnimatePresence mode="wait">
             {activeTab === 'chat' && (
               <motion.div
@@ -726,7 +726,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
-                className="flex flex-col h-full"
+                className="flex-1 flex flex-col min-h-0"
               >
               <div className="flex justify-between items-center mb-6">
                 <div>
@@ -754,21 +754,23 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                     exit={{ opacity: 0, height: 0, marginBottom: 0 }}
                     className="overflow-hidden shrink-0"
                   >
-                    <GlassCard className="p-2 flex gap-2 justify-center items-center">
-                      <button 
-                        onClick={() => setChatMode('dialogue')}
-                        className={`flex-1 p-3 rounded-2xl border transition-all flex flex-col items-center justify-center ${chatMode === 'dialogue' ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' : 'border-transparent hover:bg-white/5 text-white/60'}`}
-                      >
-                        <MessageSquare className="mb-1" size={20} />
-                        <span className="text-[10px] font-bold uppercase tracking-wider">Dialog</span>
-                      </button>
-                      <button 
-                        onClick={() => setChatMode('narrative')}
-                        className={`flex-1 p-3 rounded-2xl border transition-all flex flex-col items-center justify-center ${chatMode === 'narrative' ? 'bg-purple-500/20 border-purple-500/50 text-purple-400' : 'border-transparent hover:bg-white/5 text-white/60'}`}
-                      >
-                        <Gamepad2 className="mb-1" size={20} />
-                        <span className="text-[10px] font-bold uppercase tracking-wider">Narracja</span>
-                      </button>
+                    <GlassCard className="p-2">
+                      <div className="flex flex-row gap-2 justify-center items-center w-full">
+                        <button 
+                          onClick={() => setChatMode('dialogue')}
+                          className={`flex-1 p-3 rounded-2xl border transition-all flex flex-col items-center justify-center ${chatMode === 'dialogue' ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' : 'border-transparent hover:bg-white/5 text-white/60'}`}
+                        >
+                          <MessageSquare className="mb-1" size={20} />
+                          <span className="text-[10px] font-bold uppercase tracking-wider">Dialog</span>
+                        </button>
+                        <button 
+                          onClick={() => setChatMode('narrative')}
+                          className={`flex-1 p-3 rounded-2xl border transition-all flex flex-col items-center justify-center ${chatMode === 'narrative' ? 'bg-purple-500/20 border-purple-500/50 text-purple-400' : 'border-transparent hover:bg-white/5 text-white/60'}`}
+                        >
+                          <Gamepad2 className="mb-1" size={20} />
+                          <span className="text-[10px] font-bold uppercase tracking-wider">Narracja</span>
+                        </button>
+                      </div>
                     </GlassCard>
                   </motion.div>
                 )}
@@ -824,7 +826,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="space-y-6 h-full flex flex-col"
+              className="space-y-6 flex-1 flex flex-col min-h-0"
             >
               <div className="flex justify-between items-center shrink-0">
                 <h1 className="text-3xl font-bold">Tryb Pisania</h1>
@@ -926,7 +928,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              className="h-full flex flex-col"
+              className="flex-1 flex flex-col min-h-0"
             >
               <h1 className="text-3xl font-bold mb-8 shrink-0">Ćwiczenia</h1>
               
@@ -1114,7 +1116,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="space-y-6 h-full overflow-y-auto custom-scrollbar pb-10 pr-2"
+              className="space-y-6 flex-1 overflow-y-auto custom-scrollbar pb-10 pr-2 min-h-0"
             >
               <div className="flex items-center gap-6 mb-8 shrink-0">
                 <div className="relative group">
@@ -1594,8 +1596,6 @@ return await response.json();`)}
         </AnimatePresence>
         </div>
       </main>
-
-      <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
 
       {/* Detailed Explanation Modal */}
       <AnimatePresence>

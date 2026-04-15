@@ -57,6 +57,9 @@ private async getSql() {
 
       return data.result;
     } catch (e: any) {
+      if (e.message === 'Failed to fetch' || e.message.includes('NetworkError')) {
+        throw new Error(`[Anki ${action}] Brak połączenia z AnkiConnect. Upewnij się, że Anki jest włączone, dodatek AnkiConnect zainstalowany, a w jego ustawieniach (webCorsOriginList) dodano adres tej strony (lub "*"). Spróbuj też zmienić localhost na 127.0.0.1 w adresie URL.`);
+      }
       throw new Error(`[Anki ${action}] ${e.message}`);
     }
   }
