@@ -20,7 +20,8 @@ import {
   Plus,
   Activity,
   Terminal,
-  Cpu
+  Cpu,
+  PenTool
 } from 'lucide-react';
 import { GlassCard, GlassButton } from './components/GlassUI';
 import { BottomNav } from './components/BottomNav';
@@ -187,6 +188,10 @@ export default function App() {
   const engine = useRef<GeminiEngine | null>(null);
   const anki = useRef(new AnkiService());
 
+  const addLog = (msg: string) => {
+    setAnkiLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 10));
+  };
+
   const filteredWordsList = useMemo(() => {
     if (!knownWords.length) return [];
     
@@ -264,7 +269,8 @@ export default function App() {
             setSettings(prev => ({ ...prev, ankiFieldName: structure.fields[0] }));
           }
         } catch (e) {
-          console.error("Error fetching deck structure:", e);
+          console.warn("Error fetching deck structure:", e instanceof Error ? e.message : e);
+          addLog(`Błąd pobierania struktury talii: ${e instanceof Error ? e.message : 'Nieznany błąd'}`);
         }
       }
       
@@ -393,10 +399,6 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
     }, 2000);
     return () => clearInterval(interval);
   }, []);
-
-  const addLog = (msg: string) => {
-    setAnkiLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 10));
-  };
 
   useEffect(() => {
     localStorage.setItem('lingu_settings', JSON.stringify(settings));
@@ -1162,7 +1164,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                 <summary className="p-6 cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-blue-500/20 rounded-lg">
-                      <User size={20} className="text-blue-400" />
+                      <UserIcon size={20} className="text-blue-400" />
                     </div>
                     <h3 className="text-sm font-bold text-white/80 uppercase tracking-widest">Profil</h3>
                   </div>
@@ -1606,7 +1608,7 @@ return await response.json();`)}
                 <summary className="p-6 cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-red-500/20 rounded-lg">
-                      <Settings size={20} className="text-red-400" />
+                      <SettingsIcon size={20} className="text-red-400" />
                     </div>
                     <h3 className="text-sm font-bold text-white/80 uppercase tracking-widest">Klucze API</h3>
                   </div>
