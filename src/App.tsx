@@ -319,6 +319,7 @@ export default function App() {
   const [showTokenModal, setShowTokenModal] = useState(false);
   const [showExplanationModal, setShowExplanationModal] = useState(false);
   const [showAnkiBrowser, setShowAnkiBrowser] = useState(false);
+  const [ankiSearchQuery, setAnkiSearchQuery] = useState('');
   const [activeExplanation, setActiveExplanation] = useState<{
     message: Message;
     explanation: string;
@@ -482,6 +483,16 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
   const handleExplainMore = async (message: Message) => {
     if (!engine.current || !message.correction) return;
     
+    if (message.detailedExplanation) {
+      setActiveExplanation({
+        message,
+        explanation: message.detailedExplanation,
+        isLoading: false
+      });
+      setShowExplanationModal(true);
+      return;
+    }
+
     setActiveExplanation({
       message,
       explanation: '',
@@ -496,6 +507,8 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
         message.correctedSentence || '',
         settings
       );
+      
+      setMessages(prev => prev.map(m => m.id === message.id ? { ...m, detailedExplanation: detailed } : m));
       setActiveExplanation(prev => prev ? { ...prev, explanation: detailed, isLoading: false } : null);
     } catch (e) {
       setActiveExplanation(prev => prev ? { ...prev, explanation: 'Błąd podczas pobierania wyjaśnienia.', isLoading: false } : null);
@@ -717,7 +730,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
         <div className="absolute top-[20%] right-[10%] w-[30%] h-[30%] bg-cyan-500/10 blur-[100px] rounded-full" />
       </div>
 
-      <main className="flex-1 relative z-10 overflow-hidden pb-32 pt-6 px-4 sm:px-6 flex flex-col">
+      <main className="flex-1 relative z-10 overflow-hidden pt-6 px-4 sm:px-6 flex flex-col">
         <div className="w-full max-w-2xl mx-auto flex-1 flex flex-col min-h-0">
           <AnimatePresence mode="wait">
             {activeTab === 'chat' && (
@@ -1145,9 +1158,17 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                 </div>
               </div>
 
-              <GlassCard className="p-6 space-y-4">
-                <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">Profil</h3>
-                <div className="space-y-2">
+              <details className="group bg-white/5 border border-white/10 rounded-[2rem] overflow-hidden transition-all" open>
+                <summary className="p-6 cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-500/20 rounded-lg">
+                      <User size={20} className="text-blue-400" />
+                    </div>
+                    <h3 className="text-sm font-bold text-white/80 uppercase tracking-widest">Profil</h3>
+                  </div>
+                  <ChevronRight size={20} className="text-white/40 group-open:rotate-90 transition-transform" />
+                </summary>
+                <div className="p-6 pt-0 space-y-2 border-t border-white/5 mt-2">
                   <label className="text-xs font-medium text-white/60">URL Avatara</label>
                   <input 
                     type="text"
@@ -1157,11 +1178,20 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                     placeholder="https://..."
                   />
                 </div>
-              </GlassCard>
+              </details>
 
-              <GlassCard className="p-6 space-y-6">
-                <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">Ustawienia Językowe</h3>
-                <div className="grid grid-cols-2 gap-4">
+              <details className="group bg-white/5 border border-white/10 rounded-[2rem] overflow-hidden transition-all" open>
+                <summary className="p-6 cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-purple-500/20 rounded-lg">
+                      <BookOpen size={20} className="text-purple-400" />
+                    </div>
+                    <h3 className="text-sm font-bold text-white/80 uppercase tracking-widest">Ustawienia Językowe</h3>
+                  </div>
+                  <ChevronRight size={20} className="text-white/40 group-open:rotate-90 transition-transform" />
+                </summary>
+                <div className="p-6 pt-0 space-y-6 border-t border-white/5 mt-2">
+                  <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <label className="text-xs font-medium text-white/60">Native</label>
                     <select 
@@ -1186,11 +1216,21 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                     </select>
                   </div>
                 </div>
-              </GlassCard>
+                </div>
+              </details>
 
-              <GlassCard className="p-6 space-y-6">
-                <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">Model AI</h3>
-                <div className="space-y-4">
+              <details className="group bg-white/5 border border-white/10 rounded-[2rem] overflow-hidden transition-all">
+                <summary className="p-6 cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-500/20 rounded-lg">
+                      <Cpu size={20} className="text-blue-400" />
+                    </div>
+                    <h3 className="text-sm font-bold text-white/80 uppercase tracking-widest">Model AI (Zaawansowane)</h3>
+                  </div>
+                  <ChevronRight size={20} className="text-white/40 group-open:rotate-90 transition-transform" />
+                </summary>
+                <div className="p-6 pt-0 space-y-6 border-t border-white/5 mt-2">
+                  <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div className="space-y-0.5">
                       <span className="text-sm text-white/60 block">Równoległe zapytania AI</span>
@@ -1304,13 +1344,22 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                     </>
                   )}
                 </div>
-              </GlassCard>
+                </div>
+              </details>
 
-              <GlassCard className="p-6 space-y-6">
-                <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">Integracja Anki</h3>
-                
-                <div className="space-y-4">
-                  <div className="space-y-2">
+              <details className="group bg-white/5 border border-white/10 rounded-[2rem] overflow-hidden transition-all" open>
+                <summary className="p-6 cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-amber-500/20 rounded-lg">
+                      <RefreshCw size={20} className="text-amber-400" />
+                    </div>
+                    <h3 className="text-sm font-bold text-white/80 uppercase tracking-widest">Integracja Anki</h3>
+                  </div>
+                  <ChevronRight size={20} className="text-white/40 group-open:rotate-90 transition-transform" />
+                </summary>
+                <div className="p-6 pt-0 space-y-6 border-t border-white/5 mt-2">
+                  <div className="space-y-4">
+                    <div className="space-y-2">
                     <label className="text-xs font-medium text-white/60">Importuj plik .apkg (opcjonalnie)</label>
                     <div className="flex gap-2">
                       <input 
@@ -1492,11 +1541,20 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                     className="w-5 h-5 accent-blue-500"
                   />
                 </div>
-              </GlassCard>
+                </div>
+              </details>
 
-              <GlassCard className="p-6 space-y-6">
-                <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">Testowanie Skryptów (AnkiConnect / APKG)</h3>
-                <div className="space-y-4">
+              <details className="group bg-white/5 border border-white/10 rounded-[2rem] overflow-hidden transition-all">
+                <summary className="p-6 cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-green-500/20 rounded-lg">
+                      <PenTool size={20} className="text-green-400" />
+                    </div>
+                    <h3 className="text-sm font-bold text-white/80 uppercase tracking-widest">Testowanie Skryptów (AnkiConnect / APKG)</h3>
+                  </div>
+                  <ChevronRight size={20} className="text-white/40 group-open:rotate-90 transition-transform" />
+                </summary>
+                <div className="p-6 pt-0 space-y-4 border-t border-white/5 mt-2">
                   <p className="text-xs text-white/60">
                     Napisz własny skrypt JavaScript. Masz dostęp do <code>ankiData</code> (z pliku .apkg), <code>settings</code> oraz <code>knownWords</code>.
                   </p>
@@ -1542,11 +1600,20 @@ return await response.json();`)}
                     </div>
                   )}
                 </div>
-              </GlassCard>
+              </details>
 
-              <GlassCard className="p-6 space-y-6">
-                <h3 className="text-sm font-bold text-white/40 uppercase tracking-widest">API Gemini</h3>
-                <div className="flex items-center justify-between">
+              <details className="group bg-white/5 border border-white/10 rounded-[2rem] overflow-hidden transition-all">
+                <summary className="p-6 cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-red-500/20 rounded-lg">
+                      <Settings size={20} className="text-red-400" />
+                    </div>
+                    <h3 className="text-sm font-bold text-white/80 uppercase tracking-widest">Klucze API</h3>
+                  </div>
+                  <ChevronRight size={20} className="text-white/40 group-open:rotate-90 transition-transform" />
+                </summary>
+                <div className="p-6 pt-0 space-y-6 border-t border-white/5 mt-2">
+                  <div className="flex items-center justify-between">
                   <span className="text-sm text-white/60">Użyj klucza AI Studio (Testy)</span>
                   <input 
                     type="checkbox" 
@@ -1590,7 +1657,8 @@ return await response.json();`)}
                     <span className="text-xs font-bold">Statystyki Tokenów & API</span>
                   </button>
                 </div>
-              </GlassCard>
+                </div>
+              </details>
             </motion.div>
           )}
         </AnimatePresence>
@@ -1810,16 +1878,27 @@ return await response.json();`)}
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                <div className="mb-4 flex justify-between items-center">
-                  <span className="text-xs font-bold text-white/40 uppercase tracking-widest">
-                    Znaleziono: {filteredWordsList.length} słówek
-                  </span>
+              <div className="flex-1 overflow-y-auto p-6 custom-scrollbar flex flex-col">
+                <div className="mb-6 space-y-4 shrink-0">
+                  <input
+                    type="text"
+                    value={ankiSearchQuery}
+                    onChange={(e) => setAnkiSearchQuery(e.target.value)}
+                    placeholder="Szukaj słówka..."
+                    className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500/50 transition-all"
+                  />
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-white/40 uppercase tracking-widest">
+                      Znaleziono: {filteredWordsList.filter(w => w.word.toLowerCase().includes(ankiSearchQuery.toLowerCase())).length} słówek
+                    </span>
+                  </div>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filteredWordsList.map((word, i) => (
-                    <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-2">
-                      <span className="font-bold text-blue-400 text-lg">{word.word}</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 overflow-y-auto custom-scrollbar pb-4">
+                  {filteredWordsList
+                    .filter(w => w.word.toLowerCase().includes(ankiSearchQuery.toLowerCase()))
+                    .map((word, i) => (
+                    <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col gap-2 hover:bg-white/10 transition-colors">
+                      <span className="font-bold text-purple-400 text-lg">{word.word}</span>
                       <div className="text-[10px] text-white/40 space-y-1">
                         <p>Status: <span className="text-white/60">{word.status}</span></p>
                         {word.lastReview && (

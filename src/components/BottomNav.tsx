@@ -16,12 +16,12 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
   ];
 
   return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md z-50 flex justify-center">
-      <div className="liquidGlass-wrapper dock">
+    <div className="w-full max-w-md mx-auto z-50 flex justify-center pb-6 pt-2 shrink-0 px-4">
+      <div className="liquidGlass-wrapper dock w-full max-w-[300px]">
         <div className="liquidGlass-effect"></div>
-        <div className="liquidGlass-tint"></div>
+        <div className="liquidGlass-tint bg-gradient-to-br from-white/10 to-white/5"></div>
         <div className="liquidGlass-shine"></div>
-        <div className="liquidGlass-text dock">
+        <div className="liquidGlass-text dock flex justify-between w-full px-2">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
