@@ -28,6 +28,8 @@ import { BottomNav } from './components/BottomNav';
 import { UserSettings, Message, AnkiWord, SelectedTopic, GrammarSubsection } from './types';
 import { GeminiEngine } from './services/GeminiEngine';
 import { AnkiService } from './services/AnkiService';
+import { CreateMLCEngine } from "@mlc-ai/web-llm";
+import JSZip from 'jszip';
 
 const DEFAULT_SETTINGS: UserSettings = {
   name: 'Użytkownik',
@@ -50,6 +52,10 @@ const DEFAULT_SETTINGS: UserSettings = {
   useParallelAI: true,
   translationModel: 'gemini-3-flash-preview',
   correctionModel: 'gemini-3-flash-preview',
+  worldMemory: 500,
+  ankiAlgorithm: 'learning',
+  localModelPath: null,
+  localModelSystemPrompt: 'Jesteś pomocnym asystentem.',
 };
 
 const ChatMessage: React.FC<{ 
@@ -96,7 +102,7 @@ const ChatMessage: React.FC<{
               <span className="text-[10px] text-white/40 ml-2 uppercase tracking-widest">Tłumaczenie...</span>
             </div>
           ) : (
-            <p className="text-[15px] leading-relaxed font-medium">{message.text}</p>
+            <p className="text-[15px] leading-relaxed font-medium">{message.parts.map(p => p.text).join('')}</p>
           )}
           
           <AnimatePresence>
@@ -187,6 +193,7 @@ export default function App() {
   
   const chatEndRef = useRef<HTMLDivElement>(null);
   const engine = useRef<GeminiEngine | null>(null);
+  const localEngineRef = useRef<any>(null);
   const anki = useRef(new AnkiService());
 
   const addLog = (msg: string) => {
@@ -196,7 +203,7 @@ export default function App() {
   const filteredWordsList = useMemo(() => {
     if (!knownWords.length) return [];
     
-    return knownWords.map(word => {
+    let filtered = knownWords.map(word => {
       let displayWord = word.word || "";
       if (settings.ankiFieldName) {
         displayWord = word.fields[settings.ankiFieldName] || "";
@@ -228,7 +235,29 @@ export default function App() {
       
       return true;
     });
-  }, [knownWords, settings.ankiFieldName, settings.ankiFilterStatus, settings.ankiFilterDays]);
+
+    // Zastosuj algorytm wyboru słówek
+    if (settings.ankiAlgorithm === 'interval') {
+      // Najstarsze powtórki jako pierwsze (najdalszy czas)
+      filtered.sort((a, b) => (a.lastReview || 0) - (b.lastReview || 0));
+    } else if (settings.ankiAlgorithm === 'reps') {
+      // Najwięcej powtórzeń jako pierwsze (problematic)
+      filtered.sort((a, b) => (b.reps || 0) - (a.reps || 0));
+    } else if (settings.ankiAlgorithm === 'learning') {
+      filtered = filtered.filter(w => (w.status || '') === 'learning');
+    } else if (settings.ankiAlgorithm === 'review') {
+      filtered = filtered.filter(w => (w.status || '') === 'review');
+    } else if (settings.ankiAlgorithm === 'relearning') {
+      filtered = filtered.filter(w => (w.status || '') === 'relearning');
+    }
+
+    // Limit wyników do WorldMemory
+    if (settings.worldMemory > 0) {
+      filtered = filtered.slice(0, settings.worldMemory);
+    }
+
+    return filtered;
+  }, [knownWords, settings.ankiFieldName, settings.ankiFilterStatus, settings.ankiFilterDays, settings.ankiAlgorithm, settings.worldMemory]);
 
   // Auto-update fields and sync when deck changes
   useEffect(() => {
@@ -312,6 +341,10 @@ export default function App() {
 
   const [ankiLogs, setAnkiLogs] = useState<string[]>([]);
   const [isSyncingAnki, setIsSyncingAnki] = useState(false);
+  const [localModelLogs, setLocalModelLogs] = useState<string[]>([]);
+  const [localModelChat, setLocalModelChat] = useState<Message[]>([]);
+  const [isLocalModelLoading, setIsLocalModelLoading] = useState(false);
+  const [localModelInput, setLocalModelInput] = useState('');
   const [availableDecks, setAvailableDecks] = useState<string[]>([]);
   const [availableFields, setAvailableFields] = useState<string[]>([]);
   const [customTopics, setCustomTopics] = useState<string[]>(() => {
@@ -417,7 +450,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
     if (!inputText.trim() || !engine.current) return;
 
     const userMsgId = Date.now().toString();
-    const userMsg: Message = { id: userMsgId, role: 'user', text: inputText };
+    const userMsg: Message = { id: userMsgId, role: 'user', parts: [{ text: inputText }] };
     setMessages(prev => [...prev, userMsg]);
     setInputText('');
     setIsTyping(true);
@@ -434,7 +467,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
         const placeholderMsg: Message = {
           id: aiMsgId,
           role: 'model',
-          text: '',
+          parts: [{ text: '' }],
           isPendingTranslation: true,
           isPendingCorrection: true
         };
@@ -847,12 +880,12 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
               className="space-y-6 flex-1 flex flex-col min-h-0"
             >
               <div className="flex justify-between items-center shrink-0">
-                <h1 className="text-3xl font-bold">Tryb Pisania</h1>
+                <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">Tryb Pisania</h1>
               </div>
 
               {!writingTopic && writingTopicOptions.length === 0 && (
                 <div className="flex-1 flex flex-col items-center justify-center">
-                  <GlassCard className="p-12 flex flex-col items-center justify-center text-center space-y-6 w-full max-w-lg">
+                  <GlassCard className="p-6 md:p-12 flex flex-col items-center justify-center text-center space-y-6 w-full max-w-lg">
                     <div className="p-4 bg-blue-500/20 rounded-[2rem]">
                       <BookOpen size={48} className="text-blue-400" />
                     </div>
@@ -951,7 +984,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
               exit={{ opacity: 0, x: -20 }}
               className="flex-1 flex flex-col min-h-0"
             >
-              <h1 className="text-3xl font-bold mb-8 shrink-0">Ćwiczenia</h1>
+              <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent mb-8 shrink-0">Ćwiczenia</h1>
               
               <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
                 {activeExercise ? (
@@ -1525,6 +1558,310 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                     className="w-5 h-5 accent-blue-500"
                   />
                 </div>
+                </div>
+              </details>
+
+              <details className="group bg-white/5 border border-white/10 rounded-[2rem] overflow-hidden transition-all">
+                <summary className="p-6 cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-indigo-500/20 rounded-lg">
+                      <Terminal size={20} className="text-indigo-400" />
+                    </div>
+                    <h3 className="text-sm font-bold text-white/80 uppercase tracking-widest">LLM (Diagnostyka)</h3>
+                  </div>
+                  <ChevronRight size={20} className="text-white/40 group-open:rotate-90 transition-transform" />
+                </summary>
+                <div className="p-6 pt-0 space-y-6 border-t border-white/5 mt-2">
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-white/60">Wybierz Model</label>
+                      <input 
+                        type="text"
+                        value={settings.localModelPath || ''}
+                        onChange={(e) => setSettings({...settings, localModelPath: e.target.value})}
+                        placeholder="np. Qwen2.5-0.5B-Instruct-q4f32_1-MLC"
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-indigo-500/50"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={async () => {
+                            const modelId = settings.localModelPath;
+                            if (!modelId) {
+                                setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] ERROR: Wybierz model!`, ...prev]);
+                                return;
+                            }
+                            setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Rozpoczynanie pobierania/ładowania modelu: ${modelId}...`, ...prev]);
+                            setIsLocalModelLoading(true);
+                            try {
+                              const engine = await CreateMLCEngine(modelId, {
+                                initProgressCallback: (report) => {
+                                  let log = report.text;
+                                  if (report.progress !== undefined) {
+                                    const percent = (report.progress * 100).toFixed(1);
+                                    log = `[${percent}%] ${log}`;
+                                  }
+                                  setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] ${log}`, ...prev]);
+                                }
+                              });
+                              localEngineRef.current = engine;
+                              setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Sukces: Model ${modelId} gotowy.`, ...prev]);
+                            } catch (err: any) {
+                              setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] ERROR: ${err.message}`, ...prev]);
+                            } finally {
+                              setIsLocalModelLoading(false);
+                            }
+                          }}
+                          disabled={isLocalModelLoading}
+                          className="flex-1 bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-xl text-sm transition-all disabled:opacity-50"
+                        >
+                          {isLocalModelLoading ? 'Ładowanie...' : 'Uruchom model'}
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-white/60">Logi diagnostyczne</label>
+                      <div className="h-32 overflow-y-auto bg-black/40 rounded-xl p-3 text-[10px] font-mono text-white/60 border border-white/5 custom-scrollbar">
+                        {localModelLogs.map((log, i) => <div key={i}>{log}</div>)}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-white/60">Testowy Czat (Local LLM)</label>
+                      <div className="h-48 overflow-y-auto bg-black/40 border border-white/10 rounded-xl p-3 space-y-3 custom-scrollbar">
+                        {localModelChat.length === 0 ? (
+                          <div className="text-[10px] text-white/30 text-center mt-10">Zainicjuj model, aby rozpocząć czat.</div>
+                        ) : (
+                          localModelChat.map((msg, i) => (
+                            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                              <div className={`p-2 rounded-xl text-xs max-w-[85%] ${msg.role === 'user' ? 'bg-indigo-500/20 text-indigo-100 rounded-tr-sm' : 'bg-white/10 text-white/90 rounded-tl-sm'}`}>
+                                {msg.parts.map(p => p.text).join('')}
+                                {msg.usage && (
+                                  <div className="text-[9px] text-white/40 mt-1">
+                                    Tokens: {msg.usage.total_tokens}, Speed: {msg.usage.speed?.toFixed(2) || 0} t/s
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                        {isLocalModelLoading && localModelChat.length > 0 && (
+                          <div className="flex justify-start">
+                            <div className="p-2 rounded-xl text-xs bg-white/10 text-white/90 rounded-tl-sm animate-pulse">Pisze...</div>
+                          </div>
+                        )}
+                      </div>
+                      <form onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (!localModelInput.trim() || !localEngineRef.current || isLocalModelLoading) return;
+                        
+                        const userInput = localModelInput;
+                        setLocalModelInput('');
+                        const newUserMsg: Message = { id: Date.now().toString(), role: 'user', parts: [{ text: userInput }] };
+                        setLocalModelChat(prev => [...prev, newUserMsg]);
+                        setIsLocalModelLoading(true);
+                        
+                        const startTime = Date.now();
+                        try {
+                          const d = await localEngineRef.current.chat.completions.create({
+                            messages: [...localModelChat, newUserMsg].map(m => ({ 
+                              role: m.role === 'user' ? 'user' : 'assistant', 
+                              content: m.parts[0].text 
+                            })),
+                            temperature: 0.7,
+                          });
+                          const endTime = Date.now();
+                          const durationSeconds = (endTime - startTime) / 1000;
+                          const aiText = d.choices[0].message.content;
+                          const totalTokens = (d.usage?.total_tokens || 0);
+                          const speed = totalTokens / durationSeconds;
+                          
+                          setLocalModelChat(prev => [...prev, { 
+                            id: Date.now().toString(), 
+                            role: 'model', 
+                            parts: [{ text: aiText }],
+                            usage: { total_tokens: totalTokens, speed: speed }
+                          }]);
+                        } catch (err: any) {
+                          setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] CHAT ERROR: ${err.message}`, ...prev]);
+                        } finally {
+                          setIsLocalModelLoading(false);
+                        }
+                      }} className="flex gap-2">
+                        <input
+                          type="text"
+                          value={localModelInput}
+                          onChange={(e) => setLocalModelInput(e.target.value)}
+                          placeholder="Napisz do modelu..."
+                          disabled={!localEngineRef.current || isLocalModelLoading}
+                          className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm outline-none focus:border-indigo-500/50 transition-all disabled:opacity-50"
+                        />
+                        <button type="submit" disabled={!localEngineRef.current || isLocalModelLoading} className="bg-indigo-500/20 text-indigo-400 p-2 rounded-xl hover:bg-indigo-500/30 transition-colors disabled:opacity-50">
+                          <Send size={18} />
+                        </button>
+                      </form>
+                      
+                      <div className="flex gap-2 pt-2">
+                        <button 
+                          onClick={async () => {
+                            try {
+                              setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Eksportowanie modelu do ZIP (może potrwać)...`, ...prev]);
+                              
+                              const cacheNames = await caches.keys();
+                              const webLlmCaches = cacheNames.filter(name => name.includes('webllm') || name.includes('tvmjs'));
+                              
+                              if (webLlmCaches.length === 0) {
+                                setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Cache jest pusty!`, ...prev]);
+                                return;
+                              }
+                              
+                              const zip = new JSZip();
+                              const index: Record<string, any> = {};
+                              let fileId = 0;
+                              
+                              for (const cacheName of webLlmCaches) {
+                                const cache = await caches.open(cacheName);
+                                const keys = await cache.keys();
+                                for (const request of keys) {
+                                  const response = await cache.match(request);
+                                  if (!response) continue;
+                                  const blob = await response.blob();
+                                  const filename = `file_${fileId}`;
+                                  zip.file(filename, blob);
+                                  index[filename] = {
+                                    cacheName: cacheName,
+                                    url: request.url,
+                                    headers: [...response.headers.entries()]
+                                  };
+                                  fileId++;
+                                }
+                              }
+                              
+                              zip.file('index.json', JSON.stringify(index));
+                              const zipBlob = await zip.generateAsync({ type: 'blob' });
+                              const downloadUrl = URL.createObjectURL(zipBlob);
+                              const a = document.createElement('a');
+                              a.href = downloadUrl;
+                              a.download = `webllm-cache-${Date.now()}.zip`;
+                              a.click();
+                              setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Zakończono eksport modelu.`, ...prev]);
+                            } catch (e: any) {
+                              setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Błąd eksportu: ${e.message}`, ...prev]);
+                            }
+                          }}
+                          className="text-xs bg-white/5 hover:bg-white/10 text-white/70 py-1.5 px-3 rounded-lg"
+                        >
+                          Eksportuj Model
+                        </button>
+                        
+                        <label className="text-xs bg-white/5 hover:bg-white/10 text-white/70 py-1.5 px-3 rounded-lg cursor-pointer">
+                          Importuj Model
+                          <input type="file" accept=".zip" className="hidden" onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            try {
+                              setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Rozpakowywanie archiwum...`, ...prev]);
+                              const zip = new JSZip();
+                              await zip.loadAsync(file);
+                              const indexFile = zip.file('index.json');
+                              if (!indexFile) throw new Error("Nieprawidłowy plik zip (brak index.json).");
+                              const index = JSON.parse(await indexFile.async('string'));
+                              
+                              let count = 0;
+                              for (const [filename, meta] of Object.entries(index)) {
+                                const zipEntry = zip.file(filename);
+                                if (!zipEntry) continue;
+                                const blob = await zipEntry.async('blob');
+                                const metaData = meta as any;
+                                const cache = await caches.open(metaData.cacheName || 'tvmjs');
+                                const options = { headers: new Headers(metaData.headers) };
+                                const response = new Response(blob, options);
+                                const request = new Request(metaData.url);
+                                await cache.put(request, response);
+                                count++;
+                              }
+                              setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Zakończono import ${count} plików!`, ...prev]);
+                              e.target.value = ''; // Reset
+                            } catch (err: any) {
+                              setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Błąd importu: ${err.message}`, ...prev]);
+                            }
+                          }} />
+                        </label>
+
+                        <button 
+                          onClick={async () => {
+                            try {
+                              setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Czyszczenie cache...`, ...prev]);
+                              const cacheNames = await caches.keys();
+                              const webLlmCaches = cacheNames.filter(name => name.includes('webllm') || name.includes('tvmjs'));
+                              
+                              if (webLlmCaches.length === 0) {
+                                setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Brak cache do wyczyszczenia.`, ...prev]);
+                                return;
+                              }
+                              
+                              for (const cacheName of webLlmCaches) {
+                                await caches.delete(cacheName);
+                              }
+                              setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Cache wyczyszczony.`, ...prev]);
+                            } catch (e: any) {
+                              setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Błąd czyszczenia: ${e.message}`, ...prev]);
+                            }
+                          }}
+                          className="text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 py-1.5 px-3 rounded-lg"
+                        >
+                          Wyczyść Cache
+                        </button>
+                      </div>
+                      
+                    </div>
+                  </div>
+                </div>
+              </details>
+
+              <details className="group bg-white/5 border border-white/10 rounded-[2rem] overflow-hidden transition-all">
+                <summary className="p-6 cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-purple-500/20 rounded-lg">
+                      <SettingsIcon size={20} className="text-purple-400" />
+                    </div>
+                    <h3 className="text-sm font-bold text-white/80 uppercase tracking-widest">Algorytm</h3>
+                  </div>
+                  <ChevronRight size={20} className="text-white/40 group-open:rotate-90 transition-transform" />
+                </summary>
+                <div className="p-6 pt-0 space-y-6 border-t border-white/5 mt-2">
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-white/60">WorldMemory (Ograniczenie ilości słówek)</label>
+                      <input 
+                        type="number"
+                        value={settings.worldMemory}
+                        onChange={(e) => setSettings({...settings, worldMemory: parseInt(e.target.value) || 700})}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:border-blue-500/50"
+                      />
+                      <p className="text-[10px] text-white/40">Ilość słówek, której sztuczna inteligencja ma używać do swoich wypowiedzi.</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-white/60">Algorytm wyboru słówek</label>
+                      <select 
+                        value={settings.ankiAlgorithm}
+                        onChange={(e) => setSettings({...settings, ankiAlgorithm: e.target.value as any})}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none"
+                      >
+                        <option value="interval">Najdalszy czas powtórki (Interval)</option>
+                        <option value="reps">Najbardziej problematyczne (Reps)</option>
+                        <option value="learning">Nowo uczone (Learning)</option>
+                        <option value="review">Powtarzane (Review)</option>
+                        <option value="relearning">Ponownie uczone (Relearning)</option>
+                      </select>
+                      {settings.ankiAlgorithm === 'interval' && <p className="text-[10px] text-white/40">Słówka analizowane i sortowane są po przewidywanym czasie do kolejnej powtórki (wybierane te najbardziej oddalone w czasie).</p>}
+                      {settings.ankiAlgorithm === 'reps' && <p className="text-[10px] text-white/40">Wybierane są słówka z największą ilością dotychczasowych powtórzeń (te, które są najtrudniejsze i wymagają najwięcej uwagi).</p>}
+                      {settings.ankiAlgorithm === 'learning' && <p className="text-[10px] text-white/40">Słówka, które niedawno poznałeś i jesteś w fazie pierwszego zapamiętywania.</p>}
+                      {settings.ankiAlgorithm === 'review' && <p className="text-[10px] text-white/40">Słówka już opanowane, które przypominasz sobie po dłuższym czasie.</p>}
+                      {settings.ankiAlgorithm === 'relearning' && <p className="text-[10px] text-white/40">Słówka, które zapomniałeś podczas przeglądu i uczysz się ich na nowo.</p>}
+                    </div>
+                  </div>
                 </div>
               </details>
 

@@ -27,6 +27,10 @@ export interface UserSettings {
   useParallelAI: boolean;
   translationModel: string;
   correctionModel: string;
+  worldMemory: number;
+  ankiAlgorithm: 'interval' | 'reps' | 'learning' | 'review' | 'relearning';
+  localModelPath: string | null;
+  localModelSystemPrompt: string;
 }
 
 export interface GrammarSubsection {
@@ -51,7 +55,7 @@ export interface ChatSentence {
 export interface Message {
   id: string;
   role: 'user' | 'model';
-  text: string; // Full text for user, or combined for model
+  parts: { text: string }[];
   sentences?: ChatSentence[]; // For model responses
   correction?: string;
   correctedSentence?: string;
@@ -59,6 +63,7 @@ export interface Message {
   isPendingTranslation?: boolean;
   isPendingCorrection?: boolean;
   detailedExplanation?: string;
+  usage?: { total_tokens: number; speed: number };
 }
 
 export interface AnkiWord {

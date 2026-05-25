@@ -30,7 +30,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className="relative p-4 group dock-icon"
+                className="relative p-3 group dock-icon"
               >
                 {isActive && (
                   <motion.div
@@ -40,7 +40,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
                   />
                 )}
                 <Icon 
-                  size={28}
+                  size={24}
                   className={`relative z-10 transition-colors duration-300 ${
                     isActive ? 'text-blue-400' : 'text-white/60 group-hover:text-white'
                   }`}
