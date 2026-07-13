@@ -132,7 +132,12 @@ export class GeminiEngine {
     }
   }
 
-  async executePrompt(request: any, originalPromptString?: string, systemInstructionStr?: string): Promise<{ text: string, usage: number, latency: number }> {
+  async executePrompt(
+    request: any, 
+    originalPromptString?: string, 
+    systemInstructionStr?: string,
+    temperature?: number
+  ): Promise<{ text: string, usage: number, latency: number }> {
     const startTime = Date.now();
     
     if (this.useLocalLLM) {
@@ -161,7 +166,7 @@ export class GeminiEngine {
       if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
         const lastMsg = messages[messages.length - 1];
         const textToCheck = ((sysInst || '') + ' ' + (lastMsg.content || '')).toLowerCase();
-        if (textToCheck.includes('json')) {
+        if (textToCheck.includes('json') && !this.useLocalLLM) {
           lastMsg.content += "\n\n[System note: Remember, your response MUST be ONLY a raw JSON object. Do not add any conversational text before or after the JSON.]";
         }
       }
@@ -170,6 +175,8 @@ export class GeminiEngine {
       try {
         const response = await this.localEngine.chat.completions.create({
           messages,
+          temperature: temperature !== undefined ? temperature : 0.4,
+          top_p: 0.95,
         });
         const latency = Date.now() - startTime;
         const usage = response.usage?.total_tokens || 0;
@@ -248,10 +255,10 @@ export class GeminiEngine {
     `;
 
     if (this.useLocalLLM) {
-      systemInstruction = `You are a conversation partner for a ${settings.targetLanguage} learner. 
-Their native language is ${settings.nativeLanguage}. Level: ${settings.cefrLevel}.
-CRITICAL INSTRUCTION: You MUST output ONLY a valid JSON object. Do not output any markdown formatting, conversational filler, or thinking process. Just the JSON.
-The JSON must strictly follow this structure:
+      systemInstruction = `You are a friendly conversation partner for a ${settings.targetLanguage} learner.
+Native language: ${settings.nativeLanguage}. Level: ${settings.cefrLevel}.
+Respond ONLY with a valid JSON object. No conversational filler, no markdown code blocks. Just raw JSON.
+JSON structure:
 {
   "sentences": [
     { "text": "your response in ${settings.targetLanguage}", "translation": "translation of your response to ${settings.nativeLanguage}" }
@@ -259,11 +266,10 @@ The JSON must strictly follow this structure:
   "correctedSentence": "corrected version of the user's message (leave empty if no errors)",
   "correction": "what was wrong (leave empty if no errors)",
   "explanation": "explanation of the mistake in ${settings.nativeLanguage} (leave empty if no errors)"
-}
-Keep your response short (max 1-2 sentences).`;
+}`;
 
       if (settings.ankiLimitToKnown && knownWords && knownWords.length > 0) {
-        systemInstruction += `\n\nCRITICAL VOCABULARY LIMIT: You MUST ONLY use these words in your ${settings.targetLanguage} response: ${knownWords.join(', ')}`;
+        systemInstruction += `\n\nCRITICAL VOCABULARY LIMIT: You MUST ONLY use these words in your response: ${knownWords.join(', ')}`;
       }
     }
 
@@ -292,7 +298,12 @@ Keep your response short (max 1-2 sentences).`;
       };
     }
 
-    const { text, usage, latency } = await this.executePrompt(request, undefined, (isGemma ? undefined : systemInstruction));
+    const { text, usage, latency } = await this.executePrompt(
+      request, 
+      undefined, 
+      (isGemma ? undefined : systemInstruction),
+      this.useLocalLLM ? 0.7 : undefined
+    );
     
     this.trackUsage(usage, request, latency);
 

@@ -61,10 +61,10 @@ const DEFAULT_SETTINGS: UserSettings = {
   ankiFilterDays: 0,
   ankiFilterStatus: 'all',
   ankiCacheWords: true,
-  aiModel: 'gemini-3.5-flash',
+  aiModel: 'gemini-3.1-flash-lite',
   useParallelAI: true,
-  translationModel: 'gemini-3.5-flash',
-  correctionModel: 'gemini-3.5-flash',
+  translationModel: 'gemini-3.1-flash-lite',
+  correctionModel: 'gemini-3.1-flash-lite',
   worldMemory: 1000,
   ankiAlgorithm: 'all',
   ankiSortField: 'lastReview',
@@ -471,6 +471,12 @@ export default function App() {
   const localEngineRef = useRef<any>(null);
   const percentRef = useRef<string>("0");
   const [localModelLogs, setLocalModelLogs] = useState<string[]>([]);
+  const [customWebGPUModels, setCustomWebGPUModels] = useState<{ id: string, name: string }[]>(() => {
+    const saved = localStorage.getItem('lingu_custom_webgpu_models');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [newModelId, setNewModelId] = useState('');
+  const [newModelName, setNewModelName] = useState('');
   const anki = useRef(new AnkiService());
 
   const addLog = (msg: string) => {
@@ -2184,11 +2190,9 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                       onChange={(e) => setSettings({...settings, aiModel: e.target.value})}
                       className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none [&>option]:bg-[#151515] [&>option]:text-white"
                     >
-                      <option value="gemini-3.5-flash">Gemini 3 Flash (Domyślny)</option>
                       <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</option>
-                      <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
-                      <option value="gemma-2-27b-it">Gemma 2 27B</option>
                       <option value="gemma-4-31b-it">Gemma 4 31B</option>
+                      <option value="gemma-4-26b-it">Gemma 4 26B</option>
                     </select>
                   </div>
 
@@ -2201,11 +2205,9 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                           onChange={(e) => setSettings({...settings, translationModel: e.target.value})}
                           className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none [&>option]:bg-[#151515] [&>option]:text-white"
                         >
-                          <option value="gemini-3.5-flash">Gemini 3 Flash</option>
                           <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</option>
-                          <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
-                          <option value="gemma-2-27b-it">Gemma 2 27B</option>
                           <option value="gemma-4-31b-it">Gemma 4 31B</option>
+                          <option value="gemma-4-26b-it">Gemma 4 26B</option>
                         </select>
                       </div>
 
@@ -2216,11 +2218,9 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                           onChange={(e) => setSettings({...settings, correctionModel: e.target.value})}
                           className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none [&>option]:bg-[#151515] [&>option]:text-white"
                         >
-                          <option value="gemini-3.5-flash">Gemini 3 Flash</option>
                           <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</option>
-                          <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
-                          <option value="gemma-2-27b-it">Gemma 2 27B</option>
                           <option value="gemma-4-31b-it">Gemma 4 31B</option>
+                          <option value="gemma-4-26b-it">Gemma 4 26B</option>
                         </select>
                       </div>
                     </>
@@ -2547,6 +2547,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                           settings.localModelPath === 'Qwen2.5-0.5B-Instruct-q4f32_1-MLC' ||
                           settings.localModelPath === 'Llama-3.1-8B-Instruct-q4f32_1-MLC' ||
                           settings.localModelPath === 'HF://welcoma/gemma-4-E2B-it-q4f16_1-MLC' ||
+                          customWebGPUModels.some(m => m.id === settings.localModelPath) ||
                           !settings.localModelPath
                             ? (settings.localModelPath || '')
                             : 'custom'
@@ -2562,14 +2563,19 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                         <option value="Qwen2.5-0.5B-Instruct-q4f32_1-MLC">Qwen 2.5 (0.5B) - Szybki, mniejszy</option>
                         <option value="Llama-3.1-8B-Instruct-q4f32_1-MLC">Llama 3.1 (8B) - Większy, dokładniejszy</option>
                         <option value="HF://welcoma/gemma-4-E2B-it-q4f16_1-MLC">Gemma 4 E2B IT (q4f16) - Nowy WebGPU</option>
+                        {customWebGPUModels.map((m) => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
                         <option value="custom">Inny (własny URL / ID)</option>
                       </select>
                       
                       {(settings.localModelPath && 
                         settings.localModelPath !== 'Qwen2.5-0.5B-Instruct-q4f32_1-MLC' && 
                         settings.localModelPath !== 'Llama-3.1-8B-Instruct-q4f32_1-MLC' && 
-                        settings.localModelPath !== 'HF://welcoma/gemma-4-E2B-it-q4f16_1-MLC') || 
-                        (!['Qwen2.5-0.5B-Instruct-q4f32_1-MLC', 'Llama-3.1-8B-Instruct-q4f32_1-MLC', 'HF://welcoma/gemma-4-E2B-it-q4f16_1-MLC', ''].includes(settings.localModelPath || '')) ? (
+                        settings.localModelPath !== 'HF://welcoma/gemma-4-E2B-it-q4f16_1-MLC' &&
+                        !customWebGPUModels.some(m => m.id === settings.localModelPath)) || 
+                        (!['Qwen2.5-0.5B-Instruct-q4f32_1-MLC', 'Llama-3.1-8B-Instruct-q4f32_1-MLC', 'HF://welcoma/gemma-4-E2B-it-q4f16_1-MLC', ''].includes(settings.localModelPath || '') && 
+                         !customWebGPUModels.some(m => m.id === settings.localModelPath)) ? (
                         <input 
                           type="text"
                           value={settings.localModelPath || ''}
@@ -2578,6 +2584,71 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                           className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-indigo-500/50 mt-2"
                         />
                       ) : null}
+
+                      <div className="space-y-2 mt-4 bg-white/[0.02] border border-white/5 p-4 rounded-2xl">
+                        <p className="text-xs font-semibold text-white/80">Dodaj własny model do listy</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input 
+                            type="text"
+                            value={newModelName}
+                            onChange={(e) => setNewModelName(e.target.value)}
+                            placeholder="Nazwa np. Gemma 2 (2B)"
+                            className="bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:border-indigo-500/50 text-white"
+                          />
+                          <input 
+                            type="text"
+                            value={newModelId}
+                            onChange={(e) => setNewModelId(e.target.value)}
+                            placeholder="ID np. HF://welcoma/gemma..."
+                            className="bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:border-indigo-500/50 text-white"
+                          />
+                        </div>
+                        <button
+                          onClick={() => {
+                            if (!newModelId.trim() || !newModelName.trim()) {
+                              alert("Wypełnij oba pola!");
+                              return;
+                            }
+                            const updated = [...customWebGPUModels, { id: newModelId.trim(), name: newModelName.trim() }];
+                            setCustomWebGPUModels(updated);
+                            localStorage.setItem('lingu_custom_webgpu_models', JSON.stringify(updated));
+                            setSettings({...settings, localModelPath: newModelId.trim()});
+                            setNewModelId('');
+                            setNewModelName('');
+                            setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Dodano model: ${newModelName.trim()}`, ...prev]);
+                          }}
+                          className="w-full bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 py-2 rounded-xl text-xs font-semibold transition-all border border-indigo-500/20"
+                        >
+                          + Dodaj do listy i wybierz
+                        </button>
+                      </div>
+
+                      {customWebGPUModels.length > 0 && (
+                        <div className="pt-2">
+                          <p className="text-[10px] text-white/40 mb-1 font-bold uppercase tracking-wider">Zapisane własne modele:</p>
+                          <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                            {customWebGPUModels.map(m => (
+                              <span key={m.id} className="inline-flex items-center gap-1 px-2.5 py-1 bg-white/5 border border-white/10 rounded-xl text-[10px] text-white/60">
+                                {m.name}
+                                <button 
+                                  onClick={() => {
+                                    const updated = customWebGPUModels.filter(x => x.id !== m.id);
+                                    setCustomWebGPUModels(updated);
+                                    localStorage.setItem('lingu_custom_webgpu_models', JSON.stringify(updated));
+                                    if (settings.localModelPath === m.id) {
+                                      setSettings({...settings, localModelPath: ''});
+                                    }
+                                  }}
+                                  className="text-red-400 hover:text-red-300 font-bold ml-1 text-xs"
+                                  title="Usuń"
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       <div className="flex gap-2">
                         <button
                           onClick={async () => {
