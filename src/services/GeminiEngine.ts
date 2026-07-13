@@ -158,6 +158,14 @@ export class GeminiEngine {
         messages.push({ role: "user", content: originalPromptString });
       }
 
+      if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
+        const lastMsg = messages[messages.length - 1];
+        const textToCheck = ((sysInst || '') + ' ' + (lastMsg.content || '')).toLowerCase();
+        if (textToCheck.includes('json')) {
+          lastMsg.content += "\n\n[System note: Remember, your response MUST be ONLY a raw JSON object. Do not add any conversational text before or after the JSON.]";
+        }
+      }
+
       console.log("Local LLM request:", messages);
       try {
         const response = await this.localEngine.chat.completions.create({
@@ -217,7 +225,7 @@ export class GeminiEngine {
       lengthConstraint = `Keep your response to exactly 1 VERY simple and short sentence (absolute maximum 8-10 words) consisting ONLY of allowed vocabulary. The "sentences" array should have exactly 1 item.`;
     }
 
-    const systemInstruction = `
+    let systemInstruction = `
       You are a language learning assistant. 
       Native Language: ${settings.nativeLanguage}
       Target Language: ${settings.targetLanguage}
@@ -238,6 +246,26 @@ export class GeminiEngine {
       5. ${lengthConstraint}
       6. Keep the conversation engaging.
     `;
+
+    if (this.useLocalLLM) {
+      systemInstruction = `You are a conversation partner for a ${settings.targetLanguage} learner. 
+Their native language is ${settings.nativeLanguage}. Level: ${settings.cefrLevel}.
+CRITICAL INSTRUCTION: You MUST output ONLY a valid JSON object. Do not output any markdown formatting, conversational filler, or thinking process. Just the JSON.
+The JSON must strictly follow this structure:
+{
+  "sentences": [
+    { "text": "your response in ${settings.targetLanguage}", "translation": "translation of your response to ${settings.nativeLanguage}" }
+  ],
+  "correctedSentence": "corrected version of the user's message (leave empty if no errors)",
+  "correction": "what was wrong (leave empty if no errors)",
+  "explanation": "explanation of the mistake in ${settings.nativeLanguage} (leave empty if no errors)"
+}
+Keep your response short (max 1-2 sentences).`;
+
+      if (settings.ankiLimitToKnown && knownWords && knownWords.length > 0) {
+        systemInstruction += `\n\nCRITICAL VOCABULARY LIMIT: You MUST ONLY use these words in your ${settings.targetLanguage} response: ${knownWords.join(', ')}`;
+      }
+    }
 
     const request: any = { model };
 

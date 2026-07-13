@@ -903,8 +903,9 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
             }
         }
 
-        const mlcEngine = await CreateMLCEngine(modelId, {
-            initProgressCallback: (report) => {
+        let finalModelId = modelId;
+        let engineConfig: any = {
+            initProgressCallback: (report: any) => {
                 let log = report.text;
                 if (report.progress !== undefined) {
                     const percent = (report.progress * 100).toFixed(1);
@@ -913,7 +914,28 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                 }
                 setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] ${log}`, ...prev]);
             }
-        });
+        };
+
+        if (modelId.startsWith("HF://") || modelId.startsWith("https://huggingface.co/")) {
+            const repo = modelId.startsWith("HF://") ? `https://huggingface.co/${modelId.slice(5)}` : modelId;
+            const repoParts = repo.split('/');
+            const modelName = repoParts[repoParts.length - 1];
+            finalModelId = modelName;
+            
+            engineConfig.appConfig = {
+              model_list: [
+                {
+                  model: repo,
+                  model_id: modelName,
+                  model_lib: `${repo}/resolve/main/libs/${modelName}-webgpu.wasm`,
+                  required_features: ["shader-f16"],
+                }
+              ]
+            };
+            setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Użyto niestandardowej konfiguracji dla repozytorium: ${repo}`, ...prev]);
+        }
+
+        const mlcEngine = await CreateMLCEngine(finalModelId, engineConfig);
         localEngineRef.current = mlcEngine;
         if (engine.current) engine.current.localEngine = mlcEngine;
         setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Sukces: Model ${modelId} gotowy.`, ...prev]);
@@ -2516,13 +2538,42 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
 
                     <div className="space-y-2">
                       <label className="text-xs font-medium text-white/60">Wybierz Model</label>
-                      <input 
-                        type="text"
-                        value={settings.localModelPath || ''}
-                        onChange={(e) => setSettings({...settings, localModelPath: e.target.value})}
-                        placeholder="np. Qwen2.5-0.5B-Instruct-q4f32_1-MLC"
-                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-indigo-500/50"
-                      />
+                      <select
+                        value={
+                          settings.localModelPath === 'Qwen2.5-0.5B-Instruct-q4f32_1-MLC' ||
+                          settings.localModelPath === 'Llama-3.1-8B-Instruct-q4f32_1-MLC' ||
+                          settings.localModelPath === 'HF://welcoma/gemma-4-E2B-it-q4f16_1-MLC' ||
+                          !settings.localModelPath
+                            ? (settings.localModelPath || '')
+                            : 'custom'
+                        }
+                        onChange={(e) => {
+                          if (e.target.value !== 'custom') {
+                            setSettings({...settings, localModelPath: e.target.value});
+                          }
+                        }}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-indigo-500/50 [&>option]:bg-[#151515] [&>option]:text-white"
+                      >
+                        <option value="">-- Wybierz model --</option>
+                        <option value="Qwen2.5-0.5B-Instruct-q4f32_1-MLC">Qwen 2.5 (0.5B) - Szybki, mniejszy</option>
+                        <option value="Llama-3.1-8B-Instruct-q4f32_1-MLC">Llama 3.1 (8B) - Większy, dokładniejszy</option>
+                        <option value="HF://welcoma/gemma-4-E2B-it-q4f16_1-MLC">Gemma 4 E2B IT (q4f16) - Nowy WebGPU</option>
+                        <option value="custom">Inny (własny URL / ID)</option>
+                      </select>
+                      
+                      {(settings.localModelPath && 
+                        settings.localModelPath !== 'Qwen2.5-0.5B-Instruct-q4f32_1-MLC' && 
+                        settings.localModelPath !== 'Llama-3.1-8B-Instruct-q4f32_1-MLC' && 
+                        settings.localModelPath !== 'HF://welcoma/gemma-4-E2B-it-q4f16_1-MLC') || 
+                        (!['Qwen2.5-0.5B-Instruct-q4f32_1-MLC', 'Llama-3.1-8B-Instruct-q4f32_1-MLC', 'HF://welcoma/gemma-4-E2B-it-q4f16_1-MLC', ''].includes(settings.localModelPath || '')) ? (
+                        <input 
+                          type="text"
+                          value={settings.localModelPath || ''}
+                          onChange={(e) => setSettings({...settings, localModelPath: e.target.value})}
+                          placeholder="Wpisz ID modelu lub link HF://..."
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-indigo-500/50 mt-2"
+                        />
+                      ) : null}
                       <div className="flex gap-2">
                         <button
                           onClick={async () => {
