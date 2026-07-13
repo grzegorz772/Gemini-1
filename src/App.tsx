@@ -1126,7 +1126,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
     setIsTyping(true);
 
     try {
-      if (settings.useParallelAI) {
+      if (settings.useParallelAI && !settings.useLocalLLM) {
         const aiMsgId = (Date.now() + 1).toString();
         
         // 1. Start Correction and Base Response in PARALLEL
@@ -1787,27 +1787,28 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                   <AnimatePresence mode="popLayout">
                     {writingSentenceFeedback && (
                       <motion.div 
-                        initial={{ opacity: 0, x: 20, width: 0 }}
-                        animate={{ opacity: 1, x: 0, width: 'auto' }}
-                        exit={{ opacity: 0, x: 20, width: 0 }}
-                        className="w-full md:w-80 shrink-0"
+                        initial={{ opacity: 0, y: 15 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 15 }}
+                        transition={{ duration: 0.2 }}
+                        className="w-full md:w-80 shrink-0 md:h-full max-h-[40%] md:max-h-none flex flex-col"
                       >
-                        <div className="bg-gradient-to-br from-amber-500/10 to-amber-900/20 border border-amber-500/30 rounded-[2rem] p-6 shadow-2xl backdrop-blur-md h-full overflow-y-auto custom-scrollbar">
+                        <div className="bg-gradient-to-br from-amber-500/10 to-amber-950/20 border border-amber-500/30 rounded-[2rem] p-5 shadow-2xl backdrop-blur-md h-full overflow-y-auto custom-scrollbar">
                           <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-2 text-amber-400">
-                              <AlertCircle size={20} />
-                              <h4 className="font-bold text-sm">Korekta AI</h4>
+                              <AlertCircle size={18} />
+                              <h4 className="font-bold text-xs uppercase tracking-wider">Korekta AI</h4>
                             </div>
                             <div className="flex items-center gap-2">
                               <button 
                                 onClick={handleAcceptCorrection}
-                                className="text-white/60 hover:text-white transition-colors text-[10px] font-bold uppercase tracking-widest px-2 py-1 bg-white/5 rounded-lg border border-white/10"
+                                className="text-white/80 hover:text-white transition-colors text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 rounded-lg border border-amber-500/30 shadow-sm"
                               >
                                 Akceptuj
                               </button>
                               <button 
                                 onClick={() => setWritingSentenceFeedback(null)}
-                                className="text-white/40 hover:text-white transition-colors"
+                                className="text-white/40 hover:text-white transition-colors p-1"
                               >
                                 ✕
                               </button>
@@ -1816,18 +1817,18 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
 
                           <div className="space-y-4">
                             <div>
-                              <p className="text-[10px] uppercase tracking-widest text-amber-500/60 font-bold mb-1">
+                              <p className="text-[9px] uppercase tracking-widest text-amber-500/60 font-bold mb-1">
                                 Sugerowana poprawka
                               </p>
                               <div className="bg-black/30 p-3 rounded-lg border border-white/5">
-                                <p className="text-white/95 font-medium text-sm leading-relaxed">
+                                <p className="text-white/95 font-medium text-xs leading-relaxed">
                                   {writingSentenceFeedback.corrected}
                                 </p>
                               </div>
                             </div>
 
                             <div>
-                              <p className="text-[10px] uppercase tracking-widest text-amber-500/60 font-bold mb-1">
+                              <p className="text-[9px] uppercase tracking-widest text-amber-500/60 font-bold mb-1">
                                 Wyjaśnienie
                               </p>
                               <p className="text-xs text-white/70 leading-relaxed">

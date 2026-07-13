@@ -64,18 +64,33 @@ export class GeminiEngine {
       lengthConstraint = `Keep your response to exactly 1 VERY simple and short sentence (absolute maximum 8-10 words) consisting ONLY of allowed vocabulary.`;
     }
 
-    const prompt = `You are a language learning assistant. 
-    Native Language: ${settings.nativeLanguage}
-    Target Language: ${settings.targetLanguage}
-    CEFR Level: ${settings.cefrLevel}
-    Mode: ${mode === 'dialogue' ? 'Casual Dialogue' : 'Text Adventure Narrator'}
-    
-    Respond ONLY with the next part of the conversation in ${settings.targetLanguage}. 
-    Do not provide translations or corrections. 
-    Keep it engaging and appropriate for ${settings.cefrLevel} level.
-    
-    ${lengthConstraint}
-    ${vocabularyConstraint}`;
+    let prompt = '';
+    if (this.useLocalLLM) {
+      prompt = `You are a friendly conversation partner. You are chatting in ${settings.targetLanguage} with a language learner.
+Their native language is ${settings.nativeLanguage}, level: ${settings.cefrLevel}.
+Mode: ${mode === 'dialogue' ? 'Casual conversation' : 'RPG Text Adventure Narrator'}
+
+Respond ONLY with the next natural turn of the conversation in ${settings.targetLanguage}.
+Keep your response natural, engaging, and friendly. Do NOT include any translations, corrections, or side notes.
+Write 1 to 3 natural sentences. Do not write extremely long paragraphs.`;
+
+      if (settings.ankiLimitToKnown && knownWords && knownWords.length > 0) {
+        prompt += `\n\nCRITICAL CONSTRAINT: You MUST ONLY use these words in your ${settings.targetLanguage} response: ${knownWords.join(', ')}. Keep it to 1 very simple sentence.`;
+      }
+    } else {
+      prompt = `You are a language learning assistant. 
+      Native Language: ${settings.nativeLanguage}
+      Target Language: ${settings.targetLanguage}
+      CEFR Level: ${settings.cefrLevel}
+      Mode: ${mode === 'dialogue' ? 'Casual Dialogue' : 'Text Adventure Narrator'}
+      
+      Respond ONLY with the next part of the conversation in ${settings.targetLanguage}. 
+      Do not provide translations or corrections. 
+      Keep it engaging and appropriate for ${settings.cefrLevel} level.
+      
+      ${lengthConstraint}
+      ${vocabularyConstraint}`;
+    }
 
     const request: any = { 
       model,
@@ -89,7 +104,7 @@ export class GeminiEngine {
 
     const { text, usage, latency } = await this.executePrompt(request);
     
-    this.trackUsage(usage, request, latency);
+    this.trackUsage(usage, this.useLocalLLM ? { ...request, model: "local-llm" } : request, latency);
     return text || "Error";
   }
 
@@ -352,14 +367,18 @@ JSON structure:
       ? `CRITICAL CONSTRAINT: The topics and descriptions MUST encourage using ONLY these vocabulary words: ${knownWords.join(', ')}. You may use basic grammar words.`
       : '';
 
-    const prompt = `Generate 3 different creative writing topics for a ${settings.targetLanguage} learner at ${settings.cefrLevel} level. 
+    let prompt = `Generate 3 different creative writing topics for a ${settings.targetLanguage} learner at ${settings.cefrLevel} level. 
     ${vocabularyConstraint}
     Return JSON: { "topics": [ { "topic": "Short Title 1", "description": "Detailed instructions in ${settings.nativeLanguage}" } ] }
     IMPORTANT: Provide strictly valid JSON. Do NOT use double quotes inside the string values. Use single quotes instead if needed.`;
 
+    if (this.useLocalLLM) {
+      prompt += `\n\nCRITICAL: Respond ONLY with a valid JSON object. Do NOT include any intro, markdown formatting, code blocks, or explanations outside the JSON. Just raw JSON.`;
+    }
+
     const request: any = { model };
 
-    if (isGemma) {
+    if (isGemma || this.useLocalLLM) {
       request.contents = prompt;
     } else {
       request.contents = prompt;
@@ -367,7 +386,7 @@ JSON structure:
     }
 
     const { text: resText, usage, latency } = await this.executePrompt(request, prompt);
-    this.trackUsage(usage, request, latency);
+    this.trackUsage(usage, this.useLocalLLM ? { ...request, model: "local-llm" } : request, latency);
     const data = this.parseJson(resText || "");
     return data.topics || [];
   }
@@ -376,14 +395,18 @@ JSON structure:
     const model = settings.aiModel || "gemini-3.5-flash";
     const isGemma = model.toLowerCase().includes('gemma');
 
-    const prompt = `Check this single sentence in ${settings.targetLanguage}: "${sentence}". 
+    let prompt = `Check this single sentence in ${settings.targetLanguage}: "${sentence}". 
     Is it grammatically correct for ${settings.cefrLevel} level?
     Return JSON: { "isCorrect": boolean, "corrected": "...", "explanation": "Brief explanation in ${settings.nativeLanguage}" }
     IMPORTANT: Provide strictly valid JSON. Do NOT use double quotes inside the string values. Use single quotes instead if needed.`;
 
+    if (this.useLocalLLM) {
+      prompt += `\n\nCRITICAL: Respond ONLY with a valid JSON object. Do NOT include any intro, markdown formatting, code blocks, or explanations outside the JSON. Just raw JSON.`;
+    }
+
     const request: any = { model };
 
-    if (isGemma) {
+    if (isGemma || this.useLocalLLM) {
       request.contents = prompt;
     } else {
       request.contents = prompt;
@@ -391,7 +414,7 @@ JSON structure:
     }
 
     const { text: resText, usage, latency } = await this.executePrompt(request, prompt);
-    this.trackUsage(usage, request, latency);
+    this.trackUsage(usage, this.useLocalLLM ? { ...request, model: "local-llm" } : request, latency);
     return this.parseJson(resText || "");
   }
 
@@ -413,16 +436,20 @@ JSON structure:
          LIST OF ALLOWED VOCABULARY: ${knownWords.join(', ')}`
       : '';
 
-    const prompt = `Generate ${count} exercises of type "${type}" for ${settings.targetLanguage} learners at ${settings.cefrLevel} level. 
+    let prompt = `Generate ${count} exercises of type "${type}" for ${settings.targetLanguage} learners at ${settings.cefrLevel} level. 
     Focus on: ${grammarTopic}.
     ${levelInfo ? `Specific points to cover for this level: ${levelInfo.join(', ')}` : ''}
     ${vocabularyConstraint}
-    Return as a JSON array of objects: { "question": "...", "answer": "...", "explanation": "..." }
+    Return as a JSON array of objects: [ { "question": "...", "answer": "...", "explanation": "..." } ]
     IMPORTANT: Provide strictly valid JSON. Do NOT use double quotes inside the string values. Use single quotes instead if needed.`;
+
+    if (this.useLocalLLM) {
+      prompt += `\n\nCRITICAL: Respond ONLY with a valid JSON array of objects. Do NOT include any intro, markdown formatting, code blocks, or explanations outside the JSON. Just raw JSON.`;
+    }
 
     const request: any = { model };
 
-    if (isGemma) {
+    if (isGemma || this.useLocalLLM) {
       request.contents = prompt;
     } else {
       request.contents = prompt;
@@ -432,7 +459,7 @@ JSON structure:
     }
 
     const { text: resText, usage, latency } = await this.executePrompt(request, prompt);
-    this.trackUsage(usage, request, latency);
+    this.trackUsage(usage, this.useLocalLLM ? { ...request, model: "local-llm" } : request, latency);
 
     return this.parseJson(resText || "");
   }
@@ -442,12 +469,21 @@ JSON structure:
     const isGemma = model.toLowerCase().includes('gemma');
 
     if (this.useLocalLLM) {
-      const prompt = `Translate this text from ${settings.targetLanguage} to ${settings.nativeLanguage}: "${text}"
-Respond ONLY with the raw translation. No extra conversational text, no intro, no comments, no markdown code blocks.`;
+      const prompt = `Translate the following text from ${settings.targetLanguage} to ${settings.nativeLanguage}: "${text}"
+Respond ONLY with a JSON object in this format:
+{
+  "translation": "<the translated text in ${settings.nativeLanguage}>"
+}
+Output ONLY the raw JSON.`;
       const request: any = { model, contents: prompt };
       const { text: resText, usage, latency } = await this.executePrompt(request, prompt);
-      this.trackUsage(usage, request, latency);
-      return [{ text, translation: resText.trim() }];
+      this.trackUsage(usage, { ...request, model: "local-llm" }, latency);
+      try {
+        const parsed = this.parseJson(resText);
+        return [{ text, translation: parsed.translation || resText.trim() }];
+      } catch (err) {
+        return [{ text, translation: resText.replace(/[\{\}"]/g, '').trim() }];
+      }
     }
 
     const prompt = `Translate the following sentences from ${settings.targetLanguage} to ${settings.nativeLanguage}.
@@ -474,41 +510,38 @@ Respond ONLY with the raw translation. No extra conversational text, no intro, n
     const isGemma = model.toLowerCase().includes('gemma');
 
     if (this.useLocalLLM) {
-      const prompt = `Check this text in ${settings.targetLanguage} for mistakes: "${userText}"
-If the text is correct, respond ONLY with the word "OK".
-If there are mistakes, respond strictly in this format:
-CORRECTED: <corrected sentence>
-ERROR: <brief explanation of mistakes in ${settings.nativeLanguage}>`;
+      const prompt = `You are a professional language teacher. Analyze this message written by a learner of ${settings.targetLanguage}: "${userText}"
+If the message is correct and natural in ${settings.targetLanguage}, or if it is written in ${settings.nativeLanguage}, respond exactly with this JSON:
+{
+  "correctedSentence": "",
+  "correction": "",
+  "explanation": ""
+}
+
+Otherwise, if there are grammar, spelling, or style errors, correct them and respond with this JSON:
+{
+  "correctedSentence": "<the complete corrected sentence in ${settings.targetLanguage}>",
+  "correction": "<brief list of errors found (e.g. 'spelling', 'tense') in ${settings.nativeLanguage}>",
+  "explanation": "<very clear explanation of what was wrong and how to fix it in ${settings.nativeLanguage}>"
+}
+
+Remember: Output ONLY the raw JSON object. Do not write any explanations outside the JSON. Do not use markdown blocks.`;
+
       const request: any = { model, contents: prompt };
       const { text: resText, usage, latency } = await this.executePrompt(request, prompt);
-      this.trackUsage(usage, request, latency);
+      this.trackUsage(usage, { ...request, model: "local-llm" }, latency);
       
-      const cleanText = resText.trim();
-      const upperText = cleanText.toUpperCase();
-      if (upperText === 'OK' || upperText.startsWith('OK')) {
+      try {
+        const parsed = this.parseJson(resText);
+        return {
+          correctedSentence: parsed.correctedSentence || '',
+          correction: parsed.correction || '',
+          explanation: parsed.explanation || ''
+        };
+      } catch (err) {
+        console.error("Failed to parse local correction JSON:", err);
         return { correctedSentence: '', correction: '', explanation: '' };
       }
-      
-      let correctedSentence = '';
-      let correction = '';
-      let explanation = '';
-      
-      const lines = cleanText.split('\n');
-      for (const line of lines) {
-        if (line.toUpperCase().startsWith('CORRECTED:')) {
-          correctedSentence = line.substring(10).trim();
-        } else if (line.toUpperCase().startsWith('ERROR:')) {
-          correction = line.substring(6).trim();
-          explanation = correction;
-        }
-      }
-      
-      // Fallback if parsing failed but there is some text
-      if (!correctedSentence && cleanText.length > 0 && !cleanText.includes('CORRECTED:')) {
-        correctedSentence = cleanText;
-      }
-      
-      return { correctedSentence, correction, explanation };
     }
 
     const prompt = `Check the following text in ${settings.targetLanguage} for mistakes: "${userText}".
