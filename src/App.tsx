@@ -65,7 +65,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   useParallelAI: true,
   translationModel: 'gemini-3.5-flash',
   correctionModel: 'gemini-3.5-flash',
-  worldMemory: 500,
+  worldMemory: 1000,
   ankiAlgorithm: 'all',
   ankiSortField: 'lastReview',
   ankiSortOrder: 'desc',
@@ -114,17 +114,17 @@ const UI_TRANSLATIONS: Record<string, Record<string, string>> = {
     next: "Dalej",
     prev: "Wstecz",
     finish: "Zakończ i Zapisz",
-    nativeLangLabel: "Twój Język Ojczysty (Natywny)",
+    nativeLangLabel: "Twój Język Ojczysty (Natywny / UI)",
     targetLangLabel: "Język, którego się Uczysz (Target)",
     stepsHeader: "KROK {step} z 4",
     step1Title: "Witaj w LinguAnki! 👋",
     step1Desc: "To rewolucyjne narzędzie łączy naukę języka z Twoją osobistą talią słówek Anki. AI uczy Cię, korzystając wyłącznie ze słówek, które już znasz lub właśnie powtarzasz!",
     step2Title: "Wybór Języków 🗺️",
-    step2Desc: "Wybierz swój język ojczysty (w tym języku będą wyświetlane tłumaczenia, wyjaśnienia błędów i cały interfejs) oraz język, którego chcesz się uczyć.",
+    step2Desc: "Zacznijmy od podstaw - wybierz języki oraz swój poziom zaawansowania (CEFR).",
     step3Title: "Połączenie z Anki 🗂️",
-    step3Desc: "Możesz zaimportować plik .apkg ze swojej talii Anki lub połączyć się przez AnkiConnect (lokalny program Anki uruchomiony w tle). Wybierz odpowiedni dek i pole zawierające słówko.",
+    step3Desc: "Możesz zaimportować plik .apkg ze swojej talii Anki. Jeśli nie masz, możesz pominąć ten krok.",
     step4Title: "Filtry i Sortowanie ⚙️",
-    step4Desc: "Ustaw preferowane filtry słówek. Możesz filtrować słówka według ich statusu w Anki (np. tylko słówka w trakcie nauki lub tylko powtórzone) oraz ustawić ich sortowanie.",
+    step4Desc: "Ustaw preferowane filtry i limit słówek pobieranych z Anki. Możesz dostosować, które z Twoich słówek mają być aktywnie wykorzystywane przez AI.",
   },
   en: {
     settingsTitle: "Settings",
@@ -141,17 +141,17 @@ const UI_TRANSLATIONS: Record<string, Record<string, string>> = {
     next: "Next",
     prev: "Back",
     finish: "Finish and Save",
-    nativeLangLabel: "Your Native Language",
+    nativeLangLabel: "Your Native Language (UI)",
     targetLangLabel: "Language You Are Learning",
     stepsHeader: "STEP {step} of 4",
     step1Title: "Welcome to LinguAnki! 👋",
     step1Desc: "This revolutionary tool blends language learning with your personal Anki flashcards. The AI teaches you using only words you already know or are currently reviewing!",
     step2Title: "Language Selection 🗺️",
-    step2Desc: "Choose your native language (this language will be used for UI, explanations, and translations) and the language you wish to learn.",
+    step2Desc: "Let's start with the basics - select your languages and your proficiency level (CEFR).",
     step3Title: "Anki Connection 🗂️",
-    step3Desc: "You can import an .apkg file of your Anki deck or connect via AnkiConnect (running locally in the background). Select your deck and card field.",
-    step4Title: "Filters & Sorting ⚙️",
-    step4Desc: "Configure your desired word filters. You can filter words by their Anki status (e.g. only words currently in learning or only reviewed) and sort them.",
+    step3Desc: "You can import an .apkg file of your Anki deck. If you don't have one, you can skip this step.",
+    step4Title: "Filters & Limits ⚙️",
+    step4Desc: "Configure your desired filters and word limit for Anki. You can adjust which of your words the AI will actively use.",
   },
   de: {
     settingsTitle: "Einstellungen",
@@ -469,6 +469,8 @@ export default function App() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const engine = useRef<GeminiEngine | null>(null);
   const localEngineRef = useRef<any>(null);
+  const percentRef = useRef<string>("0");
+  const [localModelLogs, setLocalModelLogs] = useState<string[]>([]);
   const anki = useRef(new AnkiService());
 
   const addLog = (msg: string) => {
@@ -653,10 +655,26 @@ export default function App() {
 
   const [ankiLogs, setAnkiLogs] = useState<string[]>([]);
   const [isSyncingAnki, setIsSyncingAnki] = useState(false);
-  const [localModelLogs, setLocalModelLogs] = useState<string[]>([]);
   const [localModelChat, setLocalModelChat] = useState<Message[]>([]);
   const [isLocalModelLoading, setIsLocalModelLoading] = useState(false);
   const [localModelInput, setLocalModelInput] = useState('');
+
+  // Watchdog for local model loading
+  useEffect(() => {
+    let timer: any;
+    let lastPercent = percentRef.current;
+    
+    if (isLocalModelLoading) {
+      timer = setInterval(() => {
+        if (percentRef.current === lastPercent && percentRef.current !== "100.0") {
+          setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] INFO: Pobieranie wydaje się stać w miejscu (${percentRef.current}%). Jeśli trwa to długo, odśwież stronę lub użyj 'Wyczyść Cache'.`, ...prev]);
+        }
+        lastPercent = percentRef.current;
+      }, 20000); // Check every 20 seconds
+    }
+    
+    return () => clearInterval(timer);
+  }, [isLocalModelLoading]);
   const [availableDecks, setAvailableDecks] = useState<string[]>(() => {
     const saved = localStorage.getItem('lingu_available_decks');
     return saved ? JSON.parse(saved) : [];
@@ -731,6 +749,43 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
     }
   };
 
+  const checkWebGPULimits = async (): Promise<{ ok: boolean; message: string; limits?: any }> => {
+    if (!(navigator as any).gpu) {
+      return { ok: false, message: "Twoja przeglądarka nie obsługuje WebGPU. Upewnij się, że używasz Chrome, Brave lub Edge w najnowszej wersji." };
+    }
+    try {
+      const adapter = await (navigator as any).gpu.requestAdapter();
+      if (!adapter) {
+        return { ok: false, message: "Nie udało się uzyskać adaptera WebGPU. Sprawdź, czy Twoja karta graficzna obsługuje WebGPU i czy masz zainstalowane najnowsze sterowniki." };
+      }
+      const limits = adapter.limits;
+      const maxStorageBuffer = limits.maxStorageBufferBindingSize; // w bajtach
+      const maxStorageBufferMB = maxStorageBuffer / (1024 * 1024);
+      
+      const isBrave = !!(navigator as any).brave;
+      
+      // Domyślny sfałszowany limit w Brave to 128MB lub 256MB
+      if (maxStorageBufferMB <= 256) {
+        if (isBrave) {
+          return {
+            ok: false,
+            limits,
+            message: `WYKRYTO RESTRYKCJE BRAVE SHIELDS! Limity pamięci WebGPU są zablokowane na ${maxStorageBufferMB.toFixed(0)}MB (wymagane min 1024MB dla większych modeli). Ochrona przed fingerprintingiem (Brave Shields) blokuje WebGPU! Kliknij ikonę lwa (Brave Shields) w pasku adresu i wyłącz tarcze dla tej witryny, lub zmień 'Fingerprinting protection' na 'Disabled' w ustawieniach tarcz.`
+          };
+        } else {
+          return {
+            ok: false,
+            limits,
+            message: `Niskie limity WebGPU (maxStorageBufferBindingSize: ${maxStorageBufferMB.toFixed(0)}MB). Może to uniemożliwić ładowanie większych modeli. Upewnij się, że nie korzystasz z trybu Incognito / prywatnego.`
+          };
+        }
+      }
+      return { ok: true, message: `WebGPU jest gotowe i ma pełne limity (maks. bufor: ${maxStorageBufferMB.toFixed(0)}MB).`, limits };
+    } catch (err: any) {
+      return { ok: false, message: `Błąd sprawdzania WebGPU: ${err.message}` };
+    }
+  };
+
   useEffect(() => {
     if (engine.current) {
       engine.current.localEngine = localEngineRef.current;
@@ -738,10 +793,32 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
     }
   }, [settings.useLocalLLM, localEngineRef.current]);
 
+  useEffect(() => {
+    const runCheck = async () => {
+      const gpuStatus = await checkWebGPULimits();
+      setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Sprawdzenie WebGPU: ${gpuStatus.message}`, ...prev]);
+    };
+    runCheck();
+  }, []);
+
   const loadModelFromCache = async () => {
     setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Przeszukiwanie cache...`, ...prev]);
     setIsLocalModelLoading(true);
     try {
+      const gpuStatus = await checkWebGPULimits();
+      if (!gpuStatus.ok) {
+        setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] OSTRZEŻENIE / PROBLEM: ${gpuStatus.message}`, ...prev]);
+      } else {
+        setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Status WebGPU: ${gpuStatus.message}`, ...prev]);
+      }
+
+      if (navigator.storage && navigator.storage.estimate) {
+        const estimate = await navigator.storage.estimate();
+        const availableGB = ((estimate.quota || 0) - (estimate.usage || 0)) / (1024 * 1024 * 1024);
+        if (availableGB < 7) {
+          setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] OSTRZEŻENIE: Masz tylko ${availableGB.toFixed(1)}GB wolnego miejsca w przeglądarce. Modele LLM wymagają min. 7-10GB.`, ...prev]);
+        }
+      }
       let configUrl = null;
       let modelBaseUrl = null;
       let wasmUrl = null;
@@ -797,7 +874,11 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
       if (engine.current) engine.current.localEngine = mlcEngine;
       setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Sukces: Model z cache gotowy.`, ...prev]);
     } catch (err: any) {
-        setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] ERROR: ${err.message}`, ...prev]);
+        let errorMsg = err.message;
+        if (errorMsg.includes('Cache.add') || errorMsg.includes('network error') || errorMsg.includes('fetch')) {
+            errorMsg += " (Błąd pobierania. Upewnij się, że masz min. 10GB wolnego miejsca i nie jesteś w trybie incognito. Spróbuj 'Wyczyść Cache').";
+        }
+        setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] ERROR: ${errorMsg}`, ...prev]);
     } finally {
         setIsLocalModelLoading(false);
     }
@@ -807,11 +888,27 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
     setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Rozpoczynanie ładowania modelu: ${modelId}...`, ...prev]);
     setIsLocalModelLoading(true);
     try {
+        const gpuStatus = await checkWebGPULimits();
+        if (!gpuStatus.ok) {
+          setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] OSTRZEŻENIE / PROBLEM: ${gpuStatus.message}`, ...prev]);
+        } else {
+          setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Status WebGPU: ${gpuStatus.message}`, ...prev]);
+        }
+
+        if (navigator.storage && navigator.storage.estimate) {
+            const estimate = await navigator.storage.estimate();
+            const availableGB = ((estimate.quota || 0) - (estimate.usage || 0)) / (1024 * 1024 * 1024);
+            if (availableGB < 7) {
+                setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] OSTRZEŻENIE: Masz tylko ${availableGB.toFixed(1)}GB wolnego miejsca w przeglądarce. Modele LLM wymagają min. 7-10GB.`, ...prev]);
+            }
+        }
+
         const mlcEngine = await CreateMLCEngine(modelId, {
             initProgressCallback: (report) => {
                 let log = report.text;
                 if (report.progress !== undefined) {
                     const percent = (report.progress * 100).toFixed(1);
+                    percentRef.current = percent;
                     log = `[${percent}%] ${log}`;
                 }
                 setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] ${log}`, ...prev]);
@@ -821,7 +918,11 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
         if (engine.current) engine.current.localEngine = mlcEngine;
         setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Sukces: Model ${modelId} gotowy.`, ...prev]);
     } catch (err: any) {
-        setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] ERROR: ${err.message}`, ...prev]);
+        let errorMsg = err.message;
+        if (errorMsg.includes('Cache.add') || errorMsg.includes('network error') || errorMsg.includes('fetch')) {
+            errorMsg += " (Błąd pobierania. Sprawdź miejsce na dysku (min. 10GB) i tryb Incognito. Użyj 'Wyczyść Cache' jeśli pobieranie stoi w miejscu).";
+        }
+        setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] ERROR: ${errorMsg}`, ...prev]);
     } finally {
         setIsLocalModelLoading(false);
     }
@@ -1654,12 +1755,12 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                   <AnimatePresence mode="popLayout">
                     {writingSentenceFeedback && (
                       <motion.div 
-                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                        className="fixed bottom-6 right-6 z-50 w-full max-w-sm"
+                        initial={{ opacity: 0, x: 20, width: 0 }}
+                        animate={{ opacity: 1, x: 0, width: 'auto' }}
+                        exit={{ opacity: 0, x: 20, width: 0 }}
+                        className="w-full md:w-80 shrink-0"
                       >
-                        <div className="bg-gradient-to-br from-amber-900/90 to-black/90 border border-amber-500/30 rounded-2xl p-6 shadow-2xl backdrop-blur-md">
+                        <div className="bg-gradient-to-br from-amber-500/10 to-amber-900/20 border border-amber-500/30 rounded-[2rem] p-6 shadow-2xl backdrop-blur-md h-full overflow-y-auto custom-scrollbar">
                           <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-2 text-amber-400">
                               <AlertCircle size={20} />
@@ -2227,6 +2328,16 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                         <option value="reviewed">Powtórzone (Review)</option>
                       </select>
                     </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-white/60">Limit słówek (World Memory)</label>
+                    <input 
+                      type="number"
+                      value={settings.worldMemory}
+                      onChange={(e) => setSettings({...settings, worldMemory: parseInt(e.target.value) || 1000})}
+                      className="w-full bg-[#151515]/30 border border-white/10 rounded-xl p-3 outline-none text-sm focus:border-blue-500/50"
+                    />
+                  </div>
+
                     <div className="space-y-2">
                       <label className="text-xs font-medium text-white/60">Ostatnio widziane (dni)</label>
                       <input 
@@ -2438,10 +2549,52 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                           Uruchom Załadowany
                         </button>
                       </div>
+
+                      <button
+                        onClick={async () => {
+                          if (confirm("Czy na pewno chcesz wyczyścić wszystkie załadowane modele z pamięci przeglądarki? Naprawia to błędy 'Cache.add' i zawieszone pobieranie.")) {
+                            const keys = await window.caches.keys();
+                            for (const key of keys) {
+                              await window.caches.delete(key);
+                            }
+                            setLocalModelLogs(prev => [`[${new Date().toLocaleTimeString()}] Cache został wyczyszczony. Odśwież stronę.`, ...prev]);
+                          }
+                        }}
+                        className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-400 font-bold py-2 px-4 rounded-xl text-[10px] transition-all border border-red-500/20 uppercase tracking-widest"
+                      >
+                        Wyczyść Cache (Reset pobierania)
+                      </button>
                     </div>
                     
                     <div className="space-y-2">
-                      <label className="text-xs font-medium text-white/60">Logi diagnostyczne</label>
+                      <div className="flex justify-between items-center">
+                        <label className="text-xs font-medium text-white/60">Logi diagnostyczne</label>
+                        <div className="flex gap-3">
+                          <button 
+                            onClick={async () => {
+                              const gpuStatus = await checkWebGPULimits();
+                              alert(`Status WebGPU:\n\n${gpuStatus.message}`);
+                            }}
+                            className="text-[10px] text-indigo-400 hover:text-indigo-300 underline"
+                          >
+                            Sprawdź WebGPU
+                          </button>
+                          <button 
+                            onClick={async () => {
+                               if (navigator.storage && navigator.storage.estimate) {
+                                 const estimate = await navigator.storage.estimate();
+                                 const total = (estimate.quota || 0) / (1024**3);
+                                 const used = (estimate.usage || 0) / (1024**3);
+                                 const free = total - used;
+                                 alert(`Miejsce w przeglądarce:\nWolne: ${free.toFixed(2)} GB\nUżyte: ${used.toFixed(2)} GB\nLimit: ${total.toFixed(2)} GB\n\nJeśli wolne < 7 GB, pobieranie modelu może się nie udać.`);
+                               }
+                            }}
+                            className="text-[10px] text-indigo-400 hover:text-indigo-300 underline"
+                          >
+                            Sprawdź miejsce
+                          </button>
+                        </div>
+                      </div>
                       <div className="h-32 overflow-y-auto bg-black/40 rounded-xl p-3 text-[10px] font-mono text-white/60 border border-white/5 custom-scrollbar">
                         {localModelLogs.map((log, i) => <div key={i}>{log}</div>)}
                       </div>
@@ -2685,16 +2838,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                 </summary>
                 <div className="p-6 pt-0 space-y-6 border-t border-white/5 mt-2">
                   <div className="space-y-4">
-                    <div className="space-y-2">
-                      <label className="text-xs font-medium text-white/60">WorldMemory (Ograniczenie ilości słówek)</label>
-                      <input 
-                        type="number"
-                        value={settings.worldMemory}
-                        onChange={(e) => setSettings({...settings, worldMemory: parseInt(e.target.value) || 700})}
-                        className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none focus:border-blue-500/50"
-                      />
-                      <p className="text-[10px] text-white/40">Ilość słówek, której sztuczna inteligencja ma używać do swoich wypowiedzi.</p>
-                    </div>
+                    
 
                     <div className="space-y-2">
                       <label className="text-xs font-medium text-white/60">Algorytm wyboru słówek</label>
@@ -3159,7 +3303,6 @@ return await response.json();`)}
                   className="bg-blue-500 h-full"
                 />
               </div>
-
               {/* Content Area */}
               <div className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar">
                 
@@ -3180,21 +3323,48 @@ return await response.json();`)}
                       </p>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4">
-                      <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 text-center space-y-2 hover:bg-white/[0.04] transition-all">
-                        <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 mx-auto font-bold text-xs">1</div>
-                        <h4 className="text-xs font-bold text-white/80">Importuj talię</h4>
-                        <p className="text-[10px] text-white/40 leading-relaxed">Załaduj swój plik APKG lub połącz się przez wtyczkę AnkiConnect.</p>
+                    <div className="space-y-6 bg-white/[0.02] border border-white/5 rounded-2xl p-6">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-white/40 uppercase tracking-widest block">{t('nativeLangLabel')}</label>
+                        <select 
+                          value={settings.nativeLanguage}
+                          onChange={(e) => setSettings({...settings, nativeLanguage: e.target.value as any})}
+                          className="w-full bg-[#151515] border border-white/10 rounded-xl p-3 outline-none text-sm text-white [&>option]:bg-[#151515] [&>option]:text-white"
+                        >
+                          {TOP_20_LANGUAGES.map(lang => (
+                            <option key={lang.code} value={lang.code}>
+                              {lang.flag} {lang.name}
+                            </option>
+                          ))}
+                        </select>
                       </div>
-                      <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 text-center space-y-2 hover:bg-white/[0.04] transition-all">
-                        <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 mx-auto font-bold text-xs">2</div>
-                        <h4 className="text-xs font-bold text-white/80">Wybierz słówka</h4>
-                        <p className="text-[10px] text-white/40 leading-relaxed">Filtruj słówka według poziomu nauki i ustaw pożądaną kolejność.</p>
+
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-white/40 uppercase tracking-widest block">{t('targetLangLabel')}</label>
+                        <select 
+                          value={settings.targetLanguage}
+                          onChange={(e) => setSettings({...settings, targetLanguage: e.target.value as any})}
+                          className="w-full bg-[#151515] border border-white/10 rounded-xl p-3 outline-none text-sm text-white [&>option]:bg-[#151515] [&>option]:text-white"
+                        >
+                          {TOP_20_LANGUAGES.map(lang => (
+                            <option key={lang.code} value={lang.code}>
+                              {lang.flag} {lang.name}
+                            </option>
+                          ))}
+                        </select>
                       </div>
-                      <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 text-center space-y-2 hover:bg-white/[0.04] transition-all">
-                        <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 mx-auto font-bold text-xs">3</div>
-                        <h4 className="text-xs font-bold text-white/80">Rozmawiaj i ćwicz</h4>
-                        <p className="text-[10px] text-white/40 leading-relaxed">AI zadba o to, by używać tylko i wyłącznie słówek z Twojej własnej talii.</p>
+                      
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-white/40 uppercase tracking-widest block">Poziom zaawansowania (CEFR)</label>
+                        <select 
+                          value={settings.cefrLevel}
+                          onChange={(e) => setSettings({...settings, cefrLevel: e.target.value as any})}
+                          className="w-full bg-[#151515] border border-white/10 rounded-xl p-3 outline-none text-sm text-white [&>option]:bg-[#151515] [&>option]:text-white"
+                        >
+                          {['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map(lvl => (
+                            <option key={lvl} value={lvl}>{lvl}</option>
+                          ))}
+                        </select>
                       </div>
                     </div>
                   </motion.div>
@@ -3214,38 +3384,21 @@ return await response.json();`)}
                       </p>
                     </div>
 
-                    <div className="space-y-6 bg-white/[0.02] border border-white/5 rounded-2xl p-6">
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-white/40 uppercase tracking-widest block">{t('nativeLangLabel')}</label>
-                        <select 
-                          value={settings.nativeLanguage}
-                          onChange={(e) => setSettings({...settings, nativeLanguage: e.target.value as any})}
-                          className="w-full bg-[#151515] border border-white/10 rounded-xl p-3 outline-none text-sm text-white [&>option]:bg-[#151515] [&>option]:text-white"
-                        >
-                          {TOP_20_LANGUAGES.map(lang => (
-                            <option key={lang.code} value={lang.code}>
-                              {lang.flag} {lang.name}
-                            </option>
-                          ))}
-                        </select>
-                        <p className="text-[10px] text-blue-400/80 leading-relaxed">
-                          ✨ Wybór języka natywnego automatycznie dostosowuje język całego interfejsu (UI) oraz podpowiedzi gramatycznych!
-                        </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4">
+                      <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 text-center space-y-2 hover:bg-white/[0.04] transition-all">
+                        <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 mx-auto font-bold text-xs">1</div>
+                        <h4 className="text-xs font-bold text-white/80">Importuj talię</h4>
+                        <p className="text-[10px] text-white/40 leading-relaxed">Załaduj swój plik APKG z taliami Anki.</p>
                       </div>
-
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-white/40 uppercase tracking-widest block">{t('targetLangLabel')}</label>
-                        <select 
-                          value={settings.targetLanguage}
-                          onChange={(e) => setSettings({...settings, targetLanguage: e.target.value as any})}
-                          className="w-full bg-[#151515] border border-white/10 rounded-xl p-3 outline-none text-sm text-white [&>option]:bg-[#151515] [&>option]:text-white"
-                        >
-                          {TOP_20_LANGUAGES.map(lang => (
-                            <option key={lang.code} value={lang.code}>
-                              {lang.flag} {lang.name}
-                            </option>
-                          ))}
-                        </select>
+                      <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 text-center space-y-2 hover:bg-white/[0.04] transition-all">
+                        <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 mx-auto font-bold text-xs">2</div>
+                        <h4 className="text-xs font-bold text-white/80">Ćwicz, generuj ćwiczenia i sprawdzaj błędy</h4>
+                        <p className="text-[10px] text-white/40 leading-relaxed">Filtruj słówka według poziomu nauki i ustaw pożądaną kolejność.</p>
+                      </div>
+                      <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 text-center space-y-2 hover:bg-white/[0.04] transition-all">
+                        <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 mx-auto font-bold text-xs">3</div>
+                        <h4 className="text-xs font-bold text-white/80">Rozmawiaj i ćwicz</h4>
+                        <p className="text-[10px] text-white/40 leading-relaxed">AI zadba o to, by używać tylko i wyłącznie słówek z Twojej własnej talii.</p>
                       </div>
                     </div>
                   </motion.div>
@@ -3267,9 +3420,8 @@ return await response.json();`)}
 
                     <div className="space-y-4 bg-white/[0.02] border border-white/5 rounded-2xl p-6">
                       
-                      {/* Drag & Drop APKG inside Popup */}
                       <div className="space-y-2">
-                        <label className="text-xs font-bold text-white/40 uppercase tracking-widest block">Metoda 1: Prześlij plik APKG</label>
+                        <label className="text-xs font-bold text-white/40 uppercase tracking-widest block">Prześlij plik APKG</label>
                         <div 
                           className="border-2 border-dashed border-white/10 rounded-2xl p-6 text-center hover:border-blue-500/50 hover:bg-white/[0.01] transition-all cursor-pointer relative group"
                           onClick={() => document.getElementById('tutorial-apkg-upload')?.click()}
@@ -3285,6 +3437,7 @@ return await response.json();`)}
                               setIsSyncingAnki(true);
                               try {
                                 const buffer = await file.arrayBuffer();
+                                const JSZip = (window as any).JSZip;
                                 const zip = await JSZip.loadAsync(buffer);
                                 const dbFile = zip.file("collection.anki2") || zip.file("collection.anki21");
                                 if (!dbFile) throw new Error("Brak bazy danych collection.anki2 w pliku apkg.");
@@ -3319,54 +3472,14 @@ return await response.json();`)}
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between py-2">
-                        <span className="h-px bg-white/5 flex-1" />
-                        <span className="text-[10px] font-bold text-white/30 px-3 uppercase tracking-widest font-mono">LUB</span>
-                        <span className="h-px bg-white/5 flex-1" />
-                      </div>
-
-                      {/* AnkiConnect test */}
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-white/40 uppercase tracking-widest block">Metoda 2: AnkiConnect API</label>
-                        <div className="flex gap-2">
-                          <input 
-                            type="text" 
-                            value={settings.ankiUrl}
-                            onChange={(e) => setSettings({...settings, ankiUrl: e.target.value})}
-                            placeholder="http://localhost:8765"
-                            className="flex-1 bg-black/30 border border-white/10 rounded-xl p-3 text-xs outline-none focus:border-blue-500/50"
-                          />
-                          <GlassButton 
-                            onClick={async () => {
-                              setIsSyncingAnki(true);
-                              try {
-                                const decks = await anki.current.getDeckNames(settings.ankiUrl);
-                                setAvailableDecks(decks);
-                                if (decks.length > 0) {
-                                  setSettings(prev => ({ ...prev, ankiDeckName: decks[0], useAnki: true }));
-                                }
-                                alert("Połączono pomyślnie z lokalnym programem Anki!");
-                              } catch (e: any) {
-                                alert(`Błąd połączenia: upewnij się, że Anki działa w tle oraz zainstalowałeś wtyczkę AnkiConnect.`);
-                              } finally {
-                                setIsSyncingAnki(false);
-                              }
-                            }}
-                            className="text-xs px-4 bg-blue-600/10 hover:bg-blue-600/20 text-blue-300"
-                          >
-                            Połącz
-                          </GlassButton>
-                        </div>
-                      </div>
-
                       {availableDecks.length > 0 && (
-                        <div className="grid grid-cols-2 gap-4 pt-2 border-t border-white/5">
+                        <div className="grid grid-cols-2 gap-4 pt-2 border-t border-white/5 mt-4">
                           <div className="space-y-1">
                             <label className="text-[10px] font-bold text-white/40 uppercase tracking-wider block">Aktywna Talia</label>
                             <select 
                               value={settings.ankiDeckName}
                               onChange={(e) => setSettings({...settings, ankiDeckName: e.target.value})}
-                              className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white [&>option]:bg-[#151515]"
+                              className="w-full bg-[#151515] border border-white/10 rounded-xl p-2.5 text-xs text-white [&>option]:bg-[#151515]"
                             >
                               {availableDecks.map(deck => (
                                 <option key={deck} value={deck}>{deck}</option>
@@ -3379,7 +3492,7 @@ return await response.json();`)}
                               <select 
                                 value={settings.ankiFieldName}
                                 onChange={(e) => setSettings({...settings, ankiFieldName: e.target.value})}
-                                className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white [&>option]:bg-[#151515]"
+                                className="w-full bg-[#151515] border border-white/10 rounded-xl p-2.5 text-xs text-white [&>option]:bg-[#151515]"
                               >
                                 {availableFields.map(f => (
                                   <option key={f} value={f}>{f}</option>
@@ -3391,7 +3504,7 @@ return await response.json();`)}
                                 value={settings.ankiFieldName}
                                 onChange={(e) => setSettings({...settings, ankiFieldName: e.target.value})}
                                 placeholder="np. Front"
-                                className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white outline-none"
+                                className="w-full bg-[#151515] border border-white/10 rounded-xl p-2.5 text-xs text-white outline-none"
                               />
                             )}
                           </div>
@@ -3431,6 +3544,16 @@ return await response.json();`)}
                           </select>
                         </div>
 
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-white/40 uppercase tracking-wider block">Limit Słówek (World Memory)</label>
+                          <input 
+                            type="number"
+                            value={settings.worldMemory}
+                            onChange={(e) => setSettings({...settings, worldMemory: parseInt(e.target.value) || 1000})}
+                            className="w-full bg-[#151515] border border-white/10 rounded-xl p-2.5 text-xs text-white outline-none focus:border-blue-500/50"
+                          />
+                        </div>
+                        
                         <div className="space-y-1">
                           <label className="text-[10px] font-bold text-white/40 uppercase tracking-wider block">Sortowanie według</label>
                           <select 
@@ -3478,9 +3601,7 @@ return await response.json();`)}
                     </div>
                   </motion.div>
                 )}
-
               </div>
-
               {/* Footer */}
               <div className="p-6 bg-[#1f1f1f]/80 border-t border-white/5 flex justify-between">
                 <button 
