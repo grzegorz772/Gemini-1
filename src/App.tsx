@@ -929,6 +929,10 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                   model_id: modelName,
                   model_lib: `${repo}/resolve/main/libs/${modelName}-webgpu.wasm`,
                   required_features: ["shader-f16"],
+                  overrides: {
+                    sliding_window_size: -1,
+                    context_window_size: 4096
+                  }
                 }
               ]
             };
