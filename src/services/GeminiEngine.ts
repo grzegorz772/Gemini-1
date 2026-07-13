@@ -208,6 +208,19 @@ export class GeminiEngine {
     mode: 'dialogue' | 'narrative',
     knownWords?: string[]
   ): Promise<Message> {
+    if (this.useLocalLLM) {
+      const baseResponse = await this.getBaseResponse(history, userInput, settings, mode, knownWords);
+      const sentences = await this.getTranslation(baseResponse, settings);
+      const correctionData = await this.getCorrection(userInput, settings);
+      return {
+        id: Date.now().toString(),
+        role: 'model',
+        parts: [{ text: baseResponse }],
+        sentences: sentences,
+        ...correctionData
+      };
+    }
+
     const model = settings.aiModel || "gemini-3.5-flash";
     const isGemma = model.toLowerCase().includes('gemma');
 
@@ -427,6 +440,16 @@ JSON structure:
   async getTranslation(text: string, settings: UserSettings): Promise<ChatSentence[]> {
     const model = settings.translationModel || settings.aiModel || "gemini-3.5-flash";
     const isGemma = model.toLowerCase().includes('gemma');
+
+    if (this.useLocalLLM) {
+      const prompt = `Translate this text from ${settings.targetLanguage} to ${settings.nativeLanguage}: "${text}"
+Respond ONLY with the raw translation. No extra conversational text, no intro, no comments, no markdown code blocks.`;
+      const request: any = { model, contents: prompt };
+      const { text: resText, usage, latency } = await this.executePrompt(request, prompt);
+      this.trackUsage(usage, request, latency);
+      return [{ text, translation: resText.trim() }];
+    }
+
     const prompt = `Translate the following sentences from ${settings.targetLanguage} to ${settings.nativeLanguage}.
     TEXT: "${text}"
     Return JSON: { "sentences": [ { "text": "original sentence", "translation": "translated sentence" } ] }
@@ -449,6 +472,45 @@ JSON structure:
   async getCorrection(userText: string, settings: UserSettings): Promise<{ correctedSentence?: string; correction?: string; explanation?: string }> {
     const model = settings.correctionModel || settings.aiModel || "gemini-3.5-flash";
     const isGemma = model.toLowerCase().includes('gemma');
+
+    if (this.useLocalLLM) {
+      const prompt = `Check this text in ${settings.targetLanguage} for mistakes: "${userText}"
+If the text is correct, respond ONLY with the word "OK".
+If there are mistakes, respond strictly in this format:
+CORRECTED: <corrected sentence>
+ERROR: <brief explanation of mistakes in ${settings.nativeLanguage}>`;
+      const request: any = { model, contents: prompt };
+      const { text: resText, usage, latency } = await this.executePrompt(request, prompt);
+      this.trackUsage(usage, request, latency);
+      
+      const cleanText = resText.trim();
+      const upperText = cleanText.toUpperCase();
+      if (upperText === 'OK' || upperText.startsWith('OK')) {
+        return { correctedSentence: '', correction: '', explanation: '' };
+      }
+      
+      let correctedSentence = '';
+      let correction = '';
+      let explanation = '';
+      
+      const lines = cleanText.split('\n');
+      for (const line of lines) {
+        if (line.toUpperCase().startsWith('CORRECTED:')) {
+          correctedSentence = line.substring(10).trim();
+        } else if (line.toUpperCase().startsWith('ERROR:')) {
+          correction = line.substring(6).trim();
+          explanation = correction;
+        }
+      }
+      
+      // Fallback if parsing failed but there is some text
+      if (!correctedSentence && cleanText.length > 0 && !cleanText.includes('CORRECTED:')) {
+        correctedSentence = cleanText;
+      }
+      
+      return { correctedSentence, correction, explanation };
+    }
+
     const prompt = `Check the following text in ${settings.targetLanguage} for mistakes: "${userText}".
     If there are mistakes, provide a corrected version and a brief explanation in ${settings.nativeLanguage}.
     Return JSON: { "correctedSentence": "...", "correction": "...", "explanation": "..." }
