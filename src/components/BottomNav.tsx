@@ -1,23 +1,29 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { MessageCircle, User, PenTool, BookOpen, Settings } from 'lucide-react';
+import { MessageCircle, User, PenTool, BookOpen, Settings, Mic } from 'lucide-react';
 
 interface BottomNavProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  labels?: {
+    chat: string;
+    writing: string;
+    exercises: string;
+    settings: string;
+  };
 }
 
-export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab }) => {
+export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab, labels }) => {
   const tabs = [
-    { id: 'chat', icon: MessageCircle, label: 'Czat' },
-    { id: 'writing', icon: PenTool, label: 'Pisanie' },
-    { id: 'exercises', icon: BookOpen, label: 'Ćwiczenia' },
-    { id: 'profile', icon: User, label: 'Profil' },
+    { id: 'chat', icon: MessageCircle, label: labels?.chat || 'Czat' },
+    { id: 'writing', icon: PenTool, label: labels?.writing || 'Pisanie' },
+    { id: 'exercises', icon: BookOpen, label: labels?.exercises || 'Ćwiczenia' },
+    { id: 'profile', icon: User, label: labels?.settings || 'Profil' },
   ];
 
   return (
     <div className="w-full max-w-md mx-auto z-50 flex justify-center pb-6 pt-2 shrink-0 px-4">
-      <div className="liquidGlass-wrapper dock w-full max-w-[300px]">
+      <div className="liquidGlass-wrapper dock w-full max-w-[350px]">
         <div className="liquidGlass-effect"></div>
         <div className="liquidGlass-tint bg-gradient-to-br from-white/10 to-white/5"></div>
         <div className="liquidGlass-shine"></div>

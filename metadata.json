@@ -1,5 +1,6 @@
 {
   "name": "LinguAnki",
   "description": "Nowoczesna aplikacja do nauki języków z AI, efektem glassmorphism i integracją z Anki.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

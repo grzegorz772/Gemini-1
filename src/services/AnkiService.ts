@@ -143,7 +143,12 @@ private async getSql() {
     }
 
     if (daysAgo && daysAgo > 0) {
-      query += ` rated:${daysAgo}`;
+      if (filterStatus === 'all') {
+        const baseQuery = query;
+        query = `(${baseQuery} rated:${daysAgo}) OR (${baseQuery} is:new)`;
+      } else {
+        query += ` rated:${daysAgo}`;
+      }
     }
 
     console.log(`[AnkiService] Próba zapytania findCards: ${query}`);
@@ -193,20 +198,29 @@ private async getSql() {
               allFields[k] = card.fields[k].value.replace(/<[^>]*>/g, '').trim();
             });
           }
+
+          let computedStatus = statusMap[card.type] || 'new';
+          const reps = card.reps || 0;
+          const interval = card.interval || 0;
+          if (computedStatus === 'new' && (reps > 0 || interval > 0)) {
+            computedStatus = interval > 0 ? 'review' : 'learning';
+          }
+
           return {
             word: cleanWord,
             fields: allFields,
-            interval: card.interval || 0,
-            reps: card.reps || 0,
-            status: statusMap[card.type] || 'new',
+            interval: interval,
+            reps: reps,
+            status: computedStatus,
             lastReview: card.mod ? card.mod * 1000 : 0
           };
         });
 
         const filtered = mapped.filter((w: AnkiWord) => {
           if (filterStatus === 'learned' && w.status === 'new') return false;
+          if (filterStatus === 'learning' && w.status !== 'learning' && w.status !== 'relearning') return false;
           if (filterStatus === 'reviewed' && w.status !== 'review') return false;
-          if (daysAgo && daysAgo > 0) {
+          if (daysAgo && daysAgo > 0 && w.status !== 'new') {
             if (!w.lastReview) return false;
             const diffDays = (now - w.lastReview) / (1000 * 60 * 60 * 24);
             if (diffDays > daysAgo) return false;
@@ -314,20 +328,30 @@ private async getSql() {
         });
       }
 
+      if (word === "" && Object.keys(fields).length > 0) {
+        word = Object.values(fields)[0];
+      }
+
+      let computedStatus = statusMap[type] || 'new';
+      if (computedStatus === 'new' && (reps > 0 || ivl > 0)) {
+        computedStatus = ivl > 0 ? 'review' : 'learning';
+      }
+
       return {
         word,
         fields,
         interval: ivl,
         reps: reps,
-        status: statusMap[type] || 'new',
+        status: computedStatus,
         lastReview: mod * 1000
       };
     });
 
     return words.filter(w => {
       if (filterStatus === 'learned' && w.status === 'new') return false;
+      if (filterStatus === 'learning' && w.status !== 'learning' && w.status !== 'relearning') return false;
       if (filterStatus === 'reviewed' && w.status !== 'review') return false;
-      if (daysAgo && daysAgo > 0) {
+      if (daysAgo && daysAgo > 0 && w.status !== 'new') {
         if (!w.lastReview) return false;
         const diffDays = (now - w.lastReview) / (1000 * 60 * 60 * 24);
         if (diffDays > daysAgo) return false;

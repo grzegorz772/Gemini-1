@@ -6,9 +6,11 @@ interface GlassCardProps {
   className?: string;
   onClick?: () => void;
   radiusClass?: string;
+  noShine?: boolean;
+  noTint?: boolean;
 }
 
-export const GlassCard: React.FC<GlassCardProps> = ({ children, className = "", onClick, radiusClass = "rounded-[2rem]" }) => {
+export const GlassCard: React.FC<GlassCardProps> = ({ children, className = "", onClick, radiusClass = "rounded-[2rem]", noShine = false, noTint = false }) => {
   return (
     <motion.div
       whileHover={onClick ? { scale: 1.02 } : {}}
@@ -17,8 +19,8 @@ export const GlassCard: React.FC<GlassCardProps> = ({ children, className = "", 
       className={`liquidGlass-wrapper ${radiusClass} ${className}`}
     >
       <div className={`liquidGlass-effect ${radiusClass}`}></div>
-      <div className={`liquidGlass-tint ${radiusClass} bg-gradient-to-br from-white/10 to-white/5`}></div>
-      <div className={`liquidGlass-shine ${radiusClass}`}></div>
+      {!noTint && <div className={`liquidGlass-tint ${radiusClass} bg-gradient-to-br from-white/10 to-white/5`}></div>}
+      {!noShine && <div className={`liquidGlass-shine ${radiusClass}`}></div>}
       <div className="liquidGlass-text w-full">
         {children}
       </div>
