@@ -930,8 +930,8 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                   model_lib: `${repo}/resolve/main/libs/${modelName}-webgpu.wasm`,
                   required_features: ["shader-f16"],
                   overrides: {
-                    sliding_window_size: -1,
-                    context_window_size: 4096
+                    sliding_window_size: 512,
+                    context_window_size: -1
                   }
                 }
               ]
