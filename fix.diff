@@ -1,0 +1,27 @@
+--- src/App.tsx
++++ src/App.tsx
+@@ -1589,6 +1589,25 @@
+                           <span className="text-[10px] font-bold uppercase tracking-wider">Narracja</span>
+                         </button>
+                       </div>
++                      <div className="flex flex-col sm:flex-row gap-2 w-full mt-2">
++                        <select 
++                          value={settings.chatStyle || 'neutral'}
++                          onChange={(e) => setSettings({...settings, chatStyle: e.target.value as any})}
++                          className="flex-1 bg-white/5 border border-white/10 rounded-xl p-3 outline-none text-xs text-white/80 [&>option]:bg-[#151515]"
++                        >
++                          <option value="neutral">Styl: Neutralny</option>
++                          <option value="formal">Styl: Formalny</option>
++                          <option value="informal">Styl: Nieformalny</option>
++                        </select>
++                        <input 
++                          type="text"
++                          value={settings.chatPersonality || ''}
++                          onChange={(e) => setSettings({...settings, chatPersonality: e.target.value})}
++                          placeholder="Osobowość AI (np. Surowy nauczyciel)..."
++                          className="flex-[2] bg-white/5 border border-white/10 rounded-xl p-3 text-xs focus:outline-none focus:border-blue-500/50"
++                        />
++                      </div>
+                     </GlassCard>
+                   </motion.div>
+                 )}

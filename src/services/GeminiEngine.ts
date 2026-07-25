@@ -7,6 +7,7 @@ export interface TokenUsage {
   history: { tokens: number; timestamp: number; latency: number; request: any }[];
 }
 
+
 export class GeminiEngine {
   public ai: GoogleGenAI;
   public localEngine: any = null;
@@ -24,6 +25,7 @@ export class GeminiEngine {
     this.ai = new GoogleGenAI({ apiKey });
   }
 
+
   public trackUsage(tokens: number, request: any, latency: number) {
     this.usage.totalTokens += tokens;
     this.usage.lastRequest = request;
@@ -34,6 +36,7 @@ export class GeminiEngine {
     this.usage.history = this.usage.history.filter(h => h.timestamp > oneHourAgo);
   }
 
+
   async getBaseResponse(
     history: Message[],
     userInput: string,
@@ -41,6 +44,7 @@ export class GeminiEngine {
     mode: 'dialogue' | 'narrative',
     knownWords?: string[]
   ): Promise<string> {
+
     const model = settings.aiModel || "gemini-3.5-flash";
     
     // Core length restriction to prevent long paragraphs of text
@@ -68,7 +72,7 @@ export class GeminiEngine {
     if (this.useLocalLLM) {
       prompt = `You are a friendly conversation partner. You are chatting in ${settings.targetLanguage} with a language learner.
 Their native language is ${settings.nativeLanguage}, level: ${settings.cefrLevel}.
-Mode: ${mode === 'dialogue' ? 'Casual conversation' : 'RPG Text Adventure Narrator'}
+Mode: ${mode === 'dialogue' ? 'Casual conversation' : 'RPG Text Adventure Narrator'}\nStyle: ${settings.chatStyle || 'neutral'}\nPersonality: ${settings.chatPersonality || 'helpful assistant'}
 
 Respond ONLY with the next natural turn of the conversation in ${settings.targetLanguage}.
 Keep your response natural, engaging, and friendly. Do NOT include any translations, corrections, or side notes.
@@ -82,7 +86,7 @@ Write 1 to 3 natural sentences. Do not write extremely long paragraphs.`;
       Native Language: ${settings.nativeLanguage}
       Target Language: ${settings.targetLanguage}
       CEFR Level: ${settings.cefrLevel}
-      Mode: ${mode === 'dialogue' ? 'Casual Dialogue' : 'Text Adventure Narrator'}
+      Mode: ${mode === 'dialogue' ? 'Casual Dialogue' : 'Text Adventure Narrator'}\n      Style: ${settings.chatStyle || 'neutral'}\n      Personality: ${settings.chatPersonality || 'helpful assistant'}
       
       Respond ONLY with the next part of the conversation in ${settings.targetLanguage}. 
       Do not provide translations or corrections. 
@@ -107,6 +111,7 @@ Write 1 to 3 natural sentences. Do not write extremely long paragraphs.`;
     this.trackUsage(usage, this.useLocalLLM ? { ...request, model: "local-llm" } : request, latency);
     return text || "Error";
   }
+
 
   private parseJson(text: string): any {
     try {
@@ -146,6 +151,7 @@ Write 1 to 3 natural sentences. Do not write extremely long paragraphs.`;
       };
     }
   }
+
 
   async executePrompt(
     request: any, 
@@ -216,6 +222,7 @@ Write 1 to 3 natural sentences. Do not write extremely long paragraphs.`;
     }
   }
 
+
   async chat(
     history: Message[],
     userInput: string,
@@ -235,6 +242,7 @@ Write 1 to 3 natural sentences. Do not write extremely long paragraphs.`;
         ...correctionData
       };
     }
+
 
     const model = settings.aiModel || "gemini-3.5-flash";
     const isGemma = model.toLowerCase().includes('gemma');
@@ -265,7 +273,7 @@ Write 1 to 3 natural sentences. Do not write extremely long paragraphs.`;
       Native Language: ${settings.nativeLanguage}
       Target Language: ${settings.targetLanguage}
       CEFR Level: ${settings.cefrLevel}
-      Mode: ${mode === 'dialogue' ? 'Casual Dialogue' : 'Text Adventure Narrator'}
+      Mode: ${mode === 'dialogue' ? 'Casual Dialogue' : 'Text Adventure Narrator'}\n      Style: ${settings.chatStyle || 'neutral'}\n      Personality: ${settings.chatPersonality || 'helpful assistant'}
       
       RULES:
       1. Respond in a JSON format: 
@@ -359,7 +367,9 @@ JSON structure:
     }
   }
 
+
   async generateTopic(settings: UserSettings, knownWords?: string[]) {
+
     const model = settings.aiModel || "gemini-3.5-flash";
     const isGemma = model.toLowerCase().includes('gemma');
 
@@ -391,7 +401,9 @@ JSON structure:
     return data.topics || [];
   }
 
+
   async checkSentence(settings: UserSettings, sentence: string) {
+
     const model = settings.aiModel || "gemini-3.5-flash";
     const isGemma = model.toLowerCase().includes('gemma');
 
@@ -418,6 +430,7 @@ JSON structure:
     return this.parseJson(resText || "");
   }
 
+
   async generateExercises(
     settings: UserSettings,
     grammarTopic: string,
@@ -426,6 +439,7 @@ JSON structure:
     levelInfo?: string[],
     knownWords?: string[]
   ) {
+
     const model = settings.aiModel || "gemini-3.5-flash";
     const isGemma = model.toLowerCase().includes('gemma');
 
@@ -464,6 +478,7 @@ JSON structure:
     return this.parseJson(resText || "");
   }
 
+
   async getTranslation(text: string, settings: UserSettings): Promise<ChatSentence[]> {
     const model = settings.translationModel || settings.aiModel || "gemini-3.5-flash";
     const isGemma = model.toLowerCase().includes('gemma');
@@ -473,7 +488,7 @@ JSON structure:
 Respond ONLY with a JSON object in this format:
 {
   "translation": "<the translated text in ${settings.nativeLanguage}>"
-}
+
 Output ONLY the raw JSON.`;
       const request: any = { model, contents: prompt };
       const { text: resText, usage, latency } = await this.executePrompt(request, prompt);
@@ -505,6 +520,7 @@ Output ONLY the raw JSON.`;
     return data.sentences;
   }
 
+
   async getCorrection(userText: string, settings: UserSettings): Promise<{ correctedSentence?: string; correction?: string; explanation?: string }> {
     const model = settings.correctionModel || settings.aiModel || "gemini-3.5-flash";
     const isGemma = model.toLowerCase().includes('gemma');
@@ -516,14 +532,14 @@ If the message is correct and natural in ${settings.targetLanguage}, or if it is
   "correctedSentence": "",
   "correction": "",
   "explanation": ""
-}
+
 
 Otherwise, if there are grammar, spelling, or style errors, correct them and respond with this JSON:
 {
   "correctedSentence": "<the complete corrected sentence in ${settings.targetLanguage}>",
   "correction": "<brief list of errors found (e.g. 'spelling', 'tense') in ${settings.nativeLanguage}>",
   "explanation": "<very clear explanation of what was wrong and how to fix it in ${settings.nativeLanguage}>"
-}
+
 
 Remember: Output ONLY the raw JSON object. Do not write any explanations outside the JSON. Do not use markdown blocks.`;
 
@@ -563,7 +579,9 @@ Remember: Output ONLY the raw JSON object. Do not write any explanations outside
     return this.parseJson(resText || "");
   }
 
+
   async getDetailedExplanation(correction: string, original: string, corrected: string, settings: UserSettings): Promise<string> {
+
     const model = settings.aiModel || "gemini-3.5-flash";
     const prompt = `Explain in detail the grammatical mistakes made in this sentence.
     Original: "${original}"
@@ -581,6 +599,8 @@ Remember: Output ONLY the raw JSON object. Do not write any explanations outside
     return resText || "Brak szczegółowego wyjaśnienia.";
   }
 
+
+
   async generateSessionTitle(settings: UserSettings, firstMessage: string): Promise<string> {
     const model = settings.aiModel || "gemini-3.5-flash";
     const prompt = `Based on the following message, generate a very short, concise title (max 4 words) for this chat conversation in ${settings.nativeLanguage}.
@@ -597,7 +617,9 @@ Remember: Output ONLY the raw JSON object. Do not write any explanations outside
     return text?.trim().replace(/"/g, '') || "Nowy Czat";
   }
 
+
   async updateSessionTitleFromHistory(settings: UserSettings, history: Message[]): Promise<string> {
+
     const model = settings.aiModel || "gemini-3.5-flash";
     const historyText = history.map(m => `${m.role}: ${m.parts[0]?.text || ""}`).join('\n').slice(-2000); // Take last 2000 chars roughly
     const prompt = `Based on the following chat history, generate a very short, concise title (max 4 words) for this chat conversation in ${settings.nativeLanguage}.
@@ -615,9 +637,12 @@ Remember: Output ONLY the raw JSON object. Do not write any explanations outside
     return text?.trim().replace(/"/g, '') || "Czat";
   }
 
+
   async checkWriting(settings: UserSettings, text: string) {
+
     const model = settings.aiModel || "gemini-3.5-flash";
     const isGemma = model.toLowerCase().includes('gemma');
+
 
     const prompt = `Check the following text in ${settings.targetLanguage}: "${text}". 
     Provide a correction and explanation for each sentence if needed.
@@ -640,4 +665,47 @@ Remember: Output ONLY the raw JSON object. Do not write any explanations outside
 
     return this.parseJson(resText || "");
   }
+
+
+
+  async getExplanationMiniChat(history: any[], userMessage: string, messageToExplain: any, settings: any): Promise<string> {
+    const model = settings.explainerModel || settings.aiModel || "gemini-3.1-flash-lite";
+    const isGemma = model.toLowerCase().includes('gemma');
+
+    let systemPrompt = `You are a helpful language teacher. 
+    A student (native language: ${settings.nativeLanguage}, learning: ${settings.targetLanguage}, level: ${settings.cefrLevel}) is asking for an explanation of a mistake they made or something they didn't understand.
+    Original student message: "${messageToExplain.originalText}"
+    AI correction was: "${messageToExplain.message?.correctedSentence}"
+    AI explanation was: "${messageToExplain.message?.explanation}"
+    
+    The student is now asking a follow-up question.
+    Respond in ${settings.nativeLanguage}. Be concise, friendly, and helpful.`;
+
+    if (this.useLocalLLM) {
+      systemPrompt += `\n\nRespond ONLY with the text of your answer. No formatting.`;
+    }
+
+    const messages = [];
+    if (!isGemma && !this.useLocalLLM) {
+      messages.push({ role: "system", parts: [{ text: systemPrompt }] });
+    }
+
+    for (const msg of history) {
+      messages.push({
+        role: msg.role === 'user' ? 'user' : 'model',
+        parts: [{ text: msg.parts[0]?.text || msg.content }]
+      });
+    }
+
+    messages.push({
+      role: 'user',
+      parts: [{ text: (isGemma || this.useLocalLLM) ? `${systemPrompt}\n\nStudent question: ${userMessage}` : userMessage }]
+    });
+
+    const request: any = { model, contents: messages };
+    const { text, usage, latency } = await this.executePrompt(request);
+    this.trackUsage(usage, this.useLocalLLM ? { ...request, model: "local-llm" } : request, latency);
+    return text || "Error";
+  }
+
 }

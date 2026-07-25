@@ -36,6 +36,9 @@ export interface UserSettings {
   localModelSystemPrompt: string;
   useLocalLLM: boolean;
   restrictToKnownWords: boolean;
+  explainerModel?: string;
+  chatStyle?: 'formal' | 'informal' | 'neutral';
+  chatPersonality?: string;
 }
 
 export interface GrammarSubsection {

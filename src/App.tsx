@@ -73,6 +73,9 @@ const DEFAULT_SETTINGS: UserSettings = {
   localModelSystemPrompt: 'Jesteś pomocnym asystentem.',
   useLocalLLM: false,
   restrictToKnownWords: false,
+  explainerModel: 'gemini-3.1-flash-lite',
+  chatStyle: 'neutral',
+  chatPersonality: '',
 };
 
 const TOP_20_LANGUAGES = [
@@ -722,10 +725,13 @@ export default function App() {
   const [ankiSearchQuery, setAnkiSearchQuery] = useState('');
   const [activeExplanation, setActiveExplanation] = useState<{
     message: Message;
-    explanation: string;
+    explanation: string; // The short explanation
     isLoading: boolean;
     originalText?: string;
+    chatHistory: { role: 'user' | 'model'; content: string }[];
   } | null>(null);
+  const [miniChatInput, setMiniChatInput] = useState('');
+  const [isMiniChatTyping, setIsMiniChatTyping] = useState(false);
   const [tokenStats, setTokenStats] = useState({ total: 0, tpm: 0 });
 
   const [customCode, setCustomCode] = useState(`// Możesz używać: ankiData, settings, knownWords
@@ -1192,44 +1198,40 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
     }
   };
 
+  const handleMiniChatSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!miniChatInput.trim() || !activeExplanation || !engine.current) return;
+    const userMessage = miniChatInput.trim();
+    setMiniChatInput("");
+    setActiveExplanation(prev => prev ? { ...prev, chatHistory: [...prev.chatHistory, { role: "user", content: userMessage }] } : null);
+    setIsMiniChatTyping(true);
+    try {
+      const response = await engine.current.getExplanationMiniChat(activeExplanation.chatHistory, userMessage, activeExplanation, settings);
+      setActiveExplanation(prev => prev ? { ...prev, chatHistory: [...prev.chatHistory, { role: "model", content: response }] } : null);
+    } catch (e) {
+      setActiveExplanation(prev => prev ? { ...prev, chatHistory: [...prev.chatHistory, { role: "model", content: "Błąd podczas pobierania odpowiedzi." }] } : null);
+    } finally {
+      setIsMiniChatTyping(false);
+    }
+  };
+
   const handleExplainMore = async (message: Message) => {
-    if (!engine.current || !message.correction) return;
+    if (!message.correction) return;
     
     const messageIndex = messages.findIndex(m => m.id === message.id);
     const originalText = messageIndex > 0 ? messages[messageIndex - 1].parts[0].text : '';
 
-    if (message.detailedExplanation) {
-      setActiveExplanation({
-        message,
-        explanation: message.detailedExplanation,
-        isLoading: false,
-        originalText
-      });
-      setShowExplanationModal(true);
-      return;
-    }
-
     setActiveExplanation({
       message,
-      explanation: '',
-      isLoading: true,
-      originalText
+      explanation: message.explanation || message.correction,
+      isLoading: false,
+      originalText,
+      chatHistory: [{
+        role: 'model',
+        content: `Cześć! Widzę, że masz problem z tym zdaniem. W czym mogę pomóc?`
+      }]
     });
     setShowExplanationModal(true);
-
-    try {
-      const detailed = await engine.current.getDetailedExplanation(
-        message.correction,
-        originalText,
-        message.correctedSentence || '',
-        settings
-      );
-      
-      setMessages(prev => prev.map(m => m.id === message.id ? { ...m, detailedExplanation: detailed } : m));
-      setActiveExplanation(prev => prev ? { ...prev, explanation: detailed, isLoading: false } : null);
-    } catch (e) {
-      setActiveExplanation(prev => prev ? { ...prev, explanation: 'Błąd podczas pobierania wyjaśnienia.', isLoading: false } : null);
-    }
   };
 
   const handleAcceptCorrection = () => {
@@ -1510,9 +1512,14 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                     >
                       <div className="p-4 border-b border-white/10 flex items-center justify-between">
                         <span className="font-bold text-white/80 uppercase tracking-widest text-xs">Historia Czatów</span>
-                        <button onClick={startNewSession} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white/60 hover:text-white" title="Nowy Czat">
-                          <Plus size={16} />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button onClick={startNewSession} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white/60 hover:text-white" title="Nowy Czat">
+                            <Plus size={16} />
+                          </button>
+                          <button onClick={() => setIsChatHistoryOpen(false)} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white/60 hover:text-white" title="Zamknij">
+                            <X size={16} />
+                          </button>
+                        </div>
                       </div>
                       <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
                         {chatSessions.length === 0 && (
@@ -1584,6 +1591,24 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                           <Gamepad2 className="mb-1" size={20} />
                           <span className="text-[10px] font-bold uppercase tracking-wider">Narracja</span>
                         </button>
+                      </div>
+                      <div className="flex flex-col sm:flex-row gap-2 w-full mt-2">
+                        <select 
+                          value={settings.chatStyle || 'neutral'}
+                          onChange={(e) => setSettings({...settings, chatStyle: e.target.value as any})}
+                          className="flex-1 bg-white/5 border border-white/10 rounded-xl p-3 outline-none text-xs text-white/80 [&>option]:bg-[#151515]"
+                        >
+                          <option value="neutral">Styl: Neutralny</option>
+                          <option value="formal">Styl: Formalny</option>
+                          <option value="informal">Styl: Nieformalny</option>
+                        </select>
+                        <input 
+                          type="text"
+                          value={settings.chatPersonality || ''}
+                          onChange={(e) => setSettings({...settings, chatPersonality: e.target.value})}
+                          placeholder="Osobowość AI (np. Surowy nauczyciel)..."
+                          className="flex-[2] bg-white/5 border border-white/10 rounded-xl p-3 text-xs focus:outline-none focus:border-blue-500/50"
+                        />
                       </div>
                     </GlassCard>
                   </motion.div>
@@ -2191,7 +2216,8 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                       onChange={(e) => setSettings({...settings, aiModel: e.target.value})}
                       className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none [&>option]:bg-[#151515] [&>option]:text-white"
                     >
-                      <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</option>
+                      <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite</option>
+                          <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</option>
                       <option value="gemma-4-31b-it">Gemma 4 31B</option>
                       <option value="gemma-4-26b-it">Gemma 4 26B</option>
                     </select>
@@ -2206,6 +2232,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                           onChange={(e) => setSettings({...settings, translationModel: e.target.value})}
                           className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none [&>option]:bg-[#151515] [&>option]:text-white"
                         >
+                          <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite</option>
                           <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</option>
                           <option value="gemma-4-31b-it">Gemma 4 31B</option>
                           <option value="gemma-4-26b-it">Gemma 4 26B</option>
@@ -2219,6 +2246,21 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                           onChange={(e) => setSettings({...settings, correctionModel: e.target.value})}
                           className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none [&>option]:bg-[#151515] [&>option]:text-white"
                         >
+                          <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite</option>
+                          <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</option>
+                          <option value="gemma-4-31b-it">Gemma 4 31B</option>
+                          <option value="gemma-4-26b-it">Gemma 4 26B</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-medium text-white/60">Model AI Wyjaśniacz</label>
+                        <select 
+                          value={settings.explainerModel || 'gemini-3.1-flash-lite'}
+                          onChange={(e) => setSettings({...settings, explainerModel: e.target.value})}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl p-3 outline-none [&>option]:bg-[#151515] [&>option]:text-white"
+                        >
+                          <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite</option>
+                          <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite</option>
                           <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</option>
                           <option value="gemma-4-31b-it">Gemma 4 31B</option>
                           <option value="gemma-4-26b-it">Gemma 4 26B</option>
@@ -2226,7 +2268,8 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                       </div>
                     </>
                   )}
-                </div>
+                  
+                  </div>
                 </div>
               </details>
 
@@ -3141,7 +3184,7 @@ return await response.json();`)}
                   </div>
                   <div>
                     <h2 className="text-lg font-bold">Szczegółowe Wyjaśnienie</h2>
-                    <p className="text-xs text-white/40">Analiza gramatyczna Twojego błędu</p>
+                    <p className="text-xs text-white/40">Zadaj pytanie AI</p>
                   </div>
                 </div>
                 <button 
@@ -3163,37 +3206,53 @@ return await response.json();`)}
                     <p className="text-sm font-bold text-white">"{activeExplanation.message.correctedSentence}"</p>
                   </div>
                 </div>
-
-                <div className="space-y-2">
-                  <span className="text-xs font-bold text-white/40 uppercase tracking-wider">Analiza AI:</span>
-                  {activeExplanation.isLoading ? (
-                    <div className="flex flex-col items-center justify-center py-10 gap-4">
-                      <RefreshCw size={32} className="animate-spin text-blue-400" />
-                      <p className="text-xs text-white/40 animate-pulse">Przygotowywanie głębokiej analizy...</p>
+                
+                <div className="space-y-4">
+                  {activeExplanation.chatHistory.map((msg, i) => (
+                    <div key={i} className={`p-4 rounded-2xl ${msg.role === 'model' ? 'bg-blue-500/10 border border-blue-500/20' : 'bg-white/5 border border-white/10 ml-8'}`}>
+                      <span className={`text-[10px] font-bold uppercase tracking-wider block mb-2 ${msg.role === 'model' ? 'text-blue-400' : 'text-white/60'}`}>
+                        {msg.role === 'model' ? 'AI Wyjaśniacz' : 'Ty'}
+                      </span>
+                      <div className="prose prose-invert prose-sm max-w-none text-white/90 leading-relaxed">
+                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      </div>
                     </div>
-                  ) : (
-                    <div className="prose prose-invert prose-sm max-w-none text-white/80 leading-relaxed">
-                      <ReactMarkdown>{activeExplanation.explanation}</ReactMarkdown>
+                  ))}
+                  {isMiniChatTyping && (
+                    <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl animate-pulse">
+                      <div className="flex gap-2">
+                        <div className="w-2 h-2 bg-blue-400 rounded-full" />
+                        <div className="w-2 h-2 bg-blue-400 rounded-full" />
+                        <div className="w-2 h-2 bg-blue-400 rounded-full" />
+                      </div>
                     </div>
                   )}
                 </div>
               </div>
-
-              <div className="p-4 bg-white/5 border-t border-white/5 flex justify-end">
-                <button 
-                  onClick={() => setShowExplanationModal(false)}
-                  className="px-6 py-2 bg-blue-500 hover:bg-blue-600 rounded-xl text-xs font-bold transition-all shadow-lg shadow-blue-500/20"
-                >
-                  Rozumiem
-                </button>
+              <div className="p-4 bg-white/5 border-t border-white/5">
+                <form onSubmit={handleMiniChatSubmit} className="flex gap-2">
+                  <input 
+                    type="text" 
+                    value={miniChatInput}
+                    onChange={e => setMiniChatInput(e.target.value)}
+                    placeholder="Zadaj pytanie..." 
+                    className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-blue-500/50"
+                  />
+                  <button 
+                    type="submit"
+                    disabled={isMiniChatTyping || !miniChatInput.trim()}
+                    className="px-6 py-2 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-xs font-bold transition-all shadow-lg shadow-blue-500/20 flex items-center justify-center shrink-0"
+                  >
+                    Wyślij
+                  </button>
+                </form>
               </div>
             </motion.div>
           </motion.div>
         )}
+      
       </AnimatePresence>
-
       {!isInputFocused && <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />}
-
       {/* Token Usage Modal */}
       <AnimatePresence>
         {showTokenModal && (
@@ -3201,563 +3260,47 @@ return await response.json();`)}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
             onClick={() => setShowTokenModal(false)}
           >
             <motion.div 
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-[#1a1a1a] border border-white/10 rounded-3xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col shadow-2xl"
+              className="bg-[#1a1a1a] border border-white/10 rounded-3xl w-full max-w-xl overflow-hidden flex flex-col shadow-2xl"
               onClick={e => e.stopPropagation()}
             >
               <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/5">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-blue-500/20 rounded-lg">
-                    <Cpu size={20} className="text-blue-400" />
+                    <Activity size={20} className="text-blue-400" />
                   </div>
                   <div>
-                    <h2 className="text-lg font-bold">Monitor Zużycia AI</h2>
-                    <p className="text-xs text-white/40">Statystyki sesji i podgląd API</p>
+                    <h2 className="text-lg font-bold">Zużycie AI</h2>
+                    <p className="text-xs text-white/40">Statystyki sesji</p>
                   </div>
                 </div>
                 <button 
                   onClick={() => setShowTokenModal(false)}
                   className="p-2 hover:bg-white/5 rounded-full transition-colors"
-                >
-                  <RefreshCw size={20} className="text-white/40" />
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-1">
-                    <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider">Całkowite Tokeny</span>
-                    <p className="text-3xl font-mono font-bold text-blue-400">{tokenStats.total.toLocaleString()}</p>
-                  </div>
-                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-1">
-                    <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider">Tokeny na Minutę (TPM)</span>
-                    <p className="text-3xl font-mono font-bold text-green-400">{tokenStats.tpm.toLocaleString()}</p>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 text-white/40">
-                    <Terminal size={14} />
-                    <span className="text-xs font-bold uppercase tracking-wider">Historia Zapytań (Sesja)</span>
-                  </div>
-                  <div className="space-y-2">
-                    {engine.current?.usage.history && engine.current.usage.history.length > 0 ? (
-                      [...engine.current.usage.history].reverse().map((h, i) => (
-                        <details key={i} className="bg-black/40 border border-white/5 rounded-xl overflow-hidden group">
-                          <summary className="p-3 cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors">
-                            <div className="flex items-center gap-3">
-                              <span className="text-[10px] text-white/40">{new Date(h.timestamp).toLocaleTimeString()}</span>
-                              <span className="text-xs font-bold text-blue-400">{h.tokens} tokenów</span>
-                              {h.latency && <span className="text-[10px] text-white/60">{h.latency}ms</span>}
-                            </div>
-                            <ChevronRight size={14} className="text-white/40 group-open:rotate-90 transition-transform" />
-                          </summary>
-                          <div className="p-4 border-t border-white/5 font-mono text-[10px] overflow-x-auto whitespace-pre custom-scrollbar text-blue-200/80 leading-relaxed">
-                            {JSON.stringify(h.request, null, 2)}
-                          </div>
-                        </details>
-                      ))
-                    ) : (
-                      <div className="bg-black/40 border border-white/5 rounded-2xl p-4 text-center">
-                        <span className="italic text-white/20 text-xs">Brak wysłanych zapytań w tej sesji.</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex gap-3 items-start">
-                  <AlertCircle size={16} className="text-amber-400 shrink-0 mt-0.5" />
-                  <p className="text-[10px] text-amber-200/70 leading-relaxed">
-                    Dane o tokenach są szacunkowe (bazują na metadanych API lub długości tekstu). 
-                    TPM jest liczony jako suma tokenów z ostatnich 60 sekund.
-                  </p>
-                </div>
-              </div>
-
-              <div className="p-4 bg-white/5 border-t border-white/5 flex justify-end">
-                <button 
-                  onClick={() => setShowTokenModal(false)}
-                  className="px-6 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-xs font-bold transition-all"
-                >
-                  Zamknij
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Anki Browser Modal */}
-      <AnimatePresence>
-        {showAnkiBrowser && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
-            onClick={() => setShowAnkiBrowser(false)}
-          >
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-[#1a1a1a] border border-white/10 rounded-3xl w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col shadow-2xl"
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/5">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-purple-500/20 rounded-lg">
-                    <BookOpen size={20} className="text-purple-400" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-bold">Przeglądarka Słówek Anki</h2>
-                    <p className="text-xs text-white/40">Słówka z deku: {settings.ankiDeckName}</p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setShowAnkiBrowser(false)}
-                  className="p-2 hover:bg-white/5 rounded-full transition-colors"
-                >
-                  ×
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-6 custom-scrollbar flex flex-col">
-                <div className="mb-6 space-y-4 shrink-0">
-                  <input
-                    type="text"
-                    value={ankiSearchQuery}
-                    onChange={(e) => setAnkiSearchQuery(e.target.value)}
-                    placeholder="Szukaj słówka..."
-                    className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500/50 transition-all"
-                  />
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-white/40 uppercase tracking-widest">
-                      Znaleziono: {filteredWordsList.filter(w => w.word.toLowerCase().includes(ankiSearchQuery.toLowerCase())).length} słówek
-                    </span>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 overflow-y-auto custom-scrollbar pb-4">
-                  {filteredWordsList
-                    .filter(w => w.word.toLowerCase().includes(ankiSearchQuery.toLowerCase()))
-                    .map((word, i) => (
-                    <div key={i} className="bg-gradient-to-br from-white/5 to-white/[0.02] border border-white/10 rounded-2xl p-5 flex flex-col gap-2 hover:border-purple-500/30 transition-all shadow-lg hover:shadow-purple-500/10">
-                      <span className="font-bold text-white text-lg tracking-tight">{word.word}</span>
-                      <div className="flex flex-wrap gap-1">
-                          {Object.entries(word.fields).filter(([k,v]) => k !== 'word' && v.length > 0 && v.length < 50).slice(0,2).map(([k,v]) => (
-                            <span key={k} className="text-[10px] bg-white/5 px-2 py-0.5 rounded text-white/60">{v}</span>
-                          ))}
-                      </div>
-                      <div className="mt-auto pt-3 border-t border-white/5 text-[10px] text-white/40 grid grid-cols-2 gap-2">
-                        <p>Status: <span className="text-white/60 capitalize">{word.status}</span></p>
-                        <p>Reps: <span className="text-white/60">{word.reps}</span></p>
-                        {word.lastReview && (
-                          <p className="col-span-2">Ostatnia powtórka: <span className="text-white/60">{new Date(word.lastReview).toLocaleDateString()}</span></p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="p-4 bg-white/5 border-t border-white/5 flex justify-end">
-                <button 
-                  onClick={() => setShowAnkiBrowser(false)}
-                  className="px-6 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-xs font-bold transition-all"
-                >
-                  Zamknij
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Onboarding Interactive Tutorial Modal */}
-      <AnimatePresence>
-        {showTutorialModal && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md"
-            onClick={() => {
-              setShowTutorialModal(false);
-              setTutorialStep(1);
-            }}
-          >
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-[#161616] border border-white/10 rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl"
-              onClick={e => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/5">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-blue-500/20 rounded-lg">
-                    <BookOpen size={20} className="text-blue-400" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-bold">{t('tutorialTitle')}</h2>
-                    <p className="text-xs text-blue-400 font-semibold">{t('stepsHeader', tutorialStep)}</p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => {
-                    setShowTutorialModal(false);
-                    setTutorialStep(1);
-                  }}
-                  className="p-2 hover:bg-white/5 rounded-full transition-colors text-white/50 hover:text-white"
                 >
                   <X size={20} />
                 </button>
               </div>
-
-              {/* Progress Bar */}
-              <div className="w-full bg-white/5 h-1">
-                <motion.div 
-                  initial={{ width: '0%' }}
-                  animate={{ width: `${(tutorialStep / 4) * 100}%` }}
-                  transition={{ duration: 0.3 }}
-                  className="bg-blue-500 h-full"
-                />
-              </div>
-              {/* Content Area */}
-              <div className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar">
-                
-                {tutorialStep === 1 && (
-                  <motion.div 
-                    initial={{ opacity: 0, x: 20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -20 }}
-                    className="space-y-6"
-                  >
-                    <div className="text-center space-y-3 py-4">
-                      <div className="inline-flex p-4 bg-blue-500/10 text-blue-400 rounded-3xl border border-blue-500/20 animate-pulse">
-                        <Languages size={48} />
-                      </div>
-                      <h3 className="text-2xl font-extrabold tracking-tight text-white">{t('step1Title')}</h3>
-                      <p className="text-sm text-white/70 leading-relaxed max-w-md mx-auto">
-                        {t('step1Desc')}
-                      </p>
-                    </div>
-
-                    <div className="space-y-6 bg-white/[0.02] border border-white/5 rounded-2xl p-6">
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-white/40 uppercase tracking-widest block">{t('nativeLangLabel')}</label>
-                        <select 
-                          value={settings.nativeLanguage}
-                          onChange={(e) => setSettings({...settings, nativeLanguage: e.target.value as any})}
-                          className="w-full bg-[#151515] border border-white/10 rounded-xl p-3 outline-none text-sm text-white [&>option]:bg-[#151515] [&>option]:text-white"
-                        >
-                          {TOP_20_LANGUAGES.map(lang => (
-                            <option key={lang.code} value={lang.code}>
-                              {lang.flag} {lang.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-white/40 uppercase tracking-widest block">{t('targetLangLabel')}</label>
-                        <select 
-                          value={settings.targetLanguage}
-                          onChange={(e) => setSettings({...settings, targetLanguage: e.target.value as any})}
-                          className="w-full bg-[#151515] border border-white/10 rounded-xl p-3 outline-none text-sm text-white [&>option]:bg-[#151515] [&>option]:text-white"
-                        >
-                          {TOP_20_LANGUAGES.map(lang => (
-                            <option key={lang.code} value={lang.code}>
-                              {lang.flag} {lang.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-white/40 uppercase tracking-widest block">Poziom zaawansowania (CEFR)</label>
-                        <select 
-                          value={settings.cefrLevel}
-                          onChange={(e) => setSettings({...settings, cefrLevel: e.target.value as any})}
-                          className="w-full bg-[#151515] border border-white/10 rounded-xl p-3 outline-none text-sm text-white [&>option]:bg-[#151515] [&>option]:text-white"
-                        >
-                          {['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map(lvl => (
-                            <option key={lvl} value={lvl}>{lvl}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-
-                {tutorialStep === 2 && (
-                  <motion.div 
-                    initial={{ opacity: 0, x: 20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -20 }}
-                    className="space-y-6"
-                  >
-                    <div className="space-y-2">
-                      <h3 className="text-xl font-bold text-white tracking-tight">{t('step2Title')}</h3>
-                      <p className="text-xs text-white/60 leading-relaxed">
-                        {t('step2Desc')}
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4">
-                      <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 text-center space-y-2 hover:bg-white/[0.04] transition-all">
-                        <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 mx-auto font-bold text-xs">1</div>
-                        <h4 className="text-xs font-bold text-white/80">Importuj talię</h4>
-                        <p className="text-[10px] text-white/40 leading-relaxed">Załaduj swój plik APKG z taliami Anki.</p>
-                      </div>
-                      <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 text-center space-y-2 hover:bg-white/[0.04] transition-all">
-                        <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 mx-auto font-bold text-xs">2</div>
-                        <h4 className="text-xs font-bold text-white/80">Ćwicz, generuj ćwiczenia i sprawdzaj błędy</h4>
-                        <p className="text-[10px] text-white/40 leading-relaxed">Filtruj słówka według poziomu nauki i ustaw pożądaną kolejność.</p>
-                      </div>
-                      <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 text-center space-y-2 hover:bg-white/[0.04] transition-all">
-                        <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 mx-auto font-bold text-xs">3</div>
-                        <h4 className="text-xs font-bold text-white/80">Rozmawiaj i ćwicz</h4>
-                        <p className="text-[10px] text-white/40 leading-relaxed">AI zadba o to, by używać tylko i wyłącznie słówek z Twojej własnej talii.</p>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-
-                {tutorialStep === 3 && (
-                  <motion.div 
-                    initial={{ opacity: 0, x: 20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -20 }}
-                    className="space-y-6"
-                  >
-                    <div className="space-y-2">
-                      <h3 className="text-xl font-bold text-white tracking-tight">{t('step3Title')}</h3>
-                      <p className="text-xs text-white/60 leading-relaxed">
-                        {t('step3Desc')}
-                      </p>
-                    </div>
-
-                    <div className="space-y-4 bg-white/[0.02] border border-white/5 rounded-2xl p-6">
-                      
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-white/40 uppercase tracking-widest block">Prześlij plik APKG</label>
-                        <div 
-                          className="border-2 border-dashed border-white/10 rounded-2xl p-6 text-center hover:border-blue-500/50 hover:bg-white/[0.01] transition-all cursor-pointer relative group"
-                          onClick={() => document.getElementById('tutorial-apkg-upload')?.click()}
-                        >
-                          <input 
-                            type="file" 
-                            id="tutorial-apkg-upload" 
-                            accept=".apkg" 
-                            className="hidden" 
-                            onChange={async (e) => {
-                              const file = e.target.files?.[0];
-                              if (!file) return;
-                              setIsSyncingAnki(true);
-                              try {
-                                const buffer = await file.arrayBuffer();
-                                const JSZip = (window as any).JSZip;
-                                const zip = await JSZip.loadAsync(buffer);
-                                const dbFile = zip.file("collection.anki2") || zip.file("collection.anki21");
-                                if (!dbFile) throw new Error("Brak bazy danych collection.anki2 w pliku apkg.");
-                                const dbBuffer = await dbFile.async("arraybuffer");
-                                const SQL = await (window as any).initSqlJs({
-                                  locateFile: (file: string) => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
-                                });
-                                const db = new SQL.Database(new Uint8Array(dbBuffer));
-                                const decksResult = db.exec("SELECT decks FROM col");
-                                const decks = JSON.parse(decksResult[0].values[0][0] as string);
-                                const modelsResult = db.exec("SELECT models FROM col");
-                                const models = JSON.parse(modelsResult[0].values[0][0] as string);
-                                setAnkiApkgData({ decks, models, db });
-                                const deckNames = Object.values(decks).map((d: any) => d.name);
-                                setAvailableDecks(deckNames);
-                                if (deckNames.length > 0) {
-                                  setSettings(prev => ({ ...prev, ankiDeckName: deckNames[0], useAnki: true }));
-                                }
-                                addLog(`Zaimportowano bazę danych z pliku APKG.`);
-                                alert("Pomyślnie zaimportowano talię APKG!");
-                              } catch (err: any) {
-                                console.error(err);
-                                alert(`Błąd importu pliku APKG: ${err.message}`);
-                              } finally {
-                                setIsSyncingAnki(false);
-                              }
-                            }}
-                          />
-                          <Database size={32} className="mx-auto text-blue-400 group-hover:scale-110 transition-transform mb-2" />
-                          <p className="text-xs font-bold text-white/80">Przeciągnij plik .apkg lub kliknij, aby wybrać</p>
-                          <p className="text-[10px] text-white/30 mt-1">Obsługuje standardowe pakiety wyeksportowane z Anki</p>
-                        </div>
-                      </div>
-
-                      {availableDecks.length > 0 && (
-                        <div className="grid grid-cols-2 gap-4 pt-2 border-t border-white/5 mt-4">
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-white/40 uppercase tracking-wider block">Aktywna Talia</label>
-                            <select 
-                              value={settings.ankiDeckName}
-                              onChange={(e) => setSettings({...settings, ankiDeckName: e.target.value})}
-                              className="w-full bg-[#151515] border border-white/10 rounded-xl p-2.5 text-xs text-white [&>option]:bg-[#151515]"
-                            >
-                              {availableDecks.map(deck => (
-                                <option key={deck} value={deck}>{deck}</option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-white/40 uppercase tracking-wider block">Pole Słówka (Field)</label>
-                            {availableFields.length > 0 ? (
-                              <select 
-                                value={settings.ankiFieldName}
-                                onChange={(e) => setSettings({...settings, ankiFieldName: e.target.value})}
-                                className="w-full bg-[#151515] border border-white/10 rounded-xl p-2.5 text-xs text-white [&>option]:bg-[#151515]"
-                              >
-                                {availableFields.map(f => (
-                                  <option key={f} value={f}>{f}</option>
-                                ))}
-                              </select>
-                            ) : (
-                              <input 
-                                type="text"
-                                value={settings.ankiFieldName}
-                                onChange={(e) => setSettings({...settings, ankiFieldName: e.target.value})}
-                                placeholder="np. Front"
-                                className="w-full bg-[#151515] border border-white/10 rounded-xl p-2.5 text-xs text-white outline-none"
-                              />
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-                )}
-
-                {tutorialStep === 4 && (
-                  <motion.div 
-                    initial={{ opacity: 0, x: 20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -20 }}
-                    className="space-y-6"
-                  >
-                    <div className="space-y-2">
-                      <h3 className="text-xl font-bold text-white tracking-tight">{t('step4Title')}</h3>
-                      <p className="text-xs text-white/60 leading-relaxed">
-                        {t('step4Desc')}
-                      </p>
-                    </div>
-
-                    <div className="space-y-4 bg-white/[0.02] border border-white/5 rounded-2xl p-6">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-white/40 uppercase tracking-wider block">Status słówek</label>
-                          <select 
-                            value={settings.ankiFilterStatus}
-                            onChange={(e) => setSettings({...settings, ankiFilterStatus: e.target.value as any})}
-                            className="w-full bg-[#151515] border border-white/10 rounded-xl p-2.5 text-xs text-white [&>option]:bg-[#151515] [&>option]:text-white"
-                          >
-                            <option value="all">Wszystkie</option>
-                            <option value="learned">Uczone (Learning+)</option>
-                            <option value="learning">Uczone (Learning)</option>
-                            <option value="reviewed">Powtórzone (Review)</option>
-                          </select>
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-white/40 uppercase tracking-wider block">Limit Słówek (World Memory)</label>
-                          <input 
-                            type="number"
-                            value={settings.worldMemory}
-                            onChange={(e) => setSettings({...settings, worldMemory: parseInt(e.target.value) || 1000})}
-                            className="w-full bg-[#151515] border border-white/10 rounded-xl p-2.5 text-xs text-white outline-none focus:border-blue-500/50"
-                          />
-                        </div>
-                        
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-white/40 uppercase tracking-wider block">Sortowanie według</label>
-                          <select 
-                            value={settings.ankiSortField || 'none'}
-                            onChange={(e) => setSettings({...settings, ankiSortField: e.target.value as any})}
-                            className="w-full bg-[#151515] border border-white/10 rounded-xl p-2.5 text-xs text-white [&>option]:bg-[#151515] [&>option]:text-white"
-                          >
-                            <option value="none">Brak (Domyślny algorytm)</option>
-                            <option value="lastReview">Data ostatniego powtórzenia</option>
-                            <option value="interval">Interwał powtórki (Interval)</option>
-                            <option value="reps">Ilość powtórzeń (Reps)</option>
-                            <option value="word">Alfabetycznie (A-Z)</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      {/* Section Guide illustration */}
-                      <div className="pt-4 border-t border-white/5 space-y-3">
-                        <span className="text-xs font-bold text-white/40 uppercase tracking-widest block">PRZEWODNIK PO PROGRAMIE</span>
-                        
-                        <div className="flex gap-3 items-start p-3 bg-white/[0.02] rounded-xl hover:bg-white/[0.04] transition-colors">
-                          <MessageSquare size={16} className="text-blue-400 mt-0.5 shrink-0" />
-                          <div className="space-y-0.5 text-left">
-                            <h4 className="text-xs font-bold text-white/80">Czat z AI (Dialogue)</h4>
-                            <p className="text-[10px] text-white/50 leading-relaxed">Prowadź rozmowę z AI. Asystent poprawia każdy błąd i analizuje Twoją gramatykę.</p>
-                          </div>
-                        </div>
-
-                        <div className="flex gap-3 items-start p-3 bg-white/[0.02] rounded-xl hover:bg-white/[0.04] transition-colors">
-                          <PenTool size={16} className="text-purple-400 mt-0.5 shrink-0" />
-                          <div className="space-y-0.5 text-left">
-                            <h4 className="text-xs font-bold text-white/80">Gramatyka i Ćwiczenia</h4>
-                            <p className="text-[10px] text-white/50 leading-relaxed">Generuj zadania bazujące na Twoich słówkach z Anki – od prostych luk do tłumaczeń.</p>
-                          </div>
-                        </div>
-
-                        <div className="flex gap-3 items-start p-3 bg-white/[0.02] rounded-xl hover:bg-white/[0.04] transition-colors">
-                          <Database size={16} className="text-green-400 mt-0.5 shrink-0" />
-                          <div className="space-y-0.5 text-left">
-                            <h4 className="text-xs font-bold text-white/80">Słownik (Anki Vocab)</h4>
-                            <p className="text-[10px] text-white/50 leading-relaxed">Przeglądaj, przeszukuj i sortuj zsynchronizowane słówka oraz sprawdzaj ich postęp.</p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </div>
-              {/* Footer */}
-              <div className="p-6 bg-[#1f1f1f]/80 border-t border-white/5 flex justify-between">
-                <button 
-                  onClick={() => setTutorialStep(prev => Math.max(1, prev - 1))}
-                  disabled={tutorialStep === 1}
-                  className="px-6 py-2.5 rounded-xl text-xs font-bold bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none transition-all text-white"
-                >
-                  {t('prev')}
-                </button>
-
-                {tutorialStep < 4 ? (
-                  <button 
-                    onClick={() => setTutorialStep(prev => Math.min(4, prev + 1))}
-                    className="px-6 py-2.5 bg-blue-500 hover:bg-blue-600 rounded-xl text-xs font-bold transition-all shadow-lg shadow-blue-500/20 text-white"
-                  >
-                    {t('next')}
-                  </button>
-                ) : (
-                  <button 
-                    onClick={() => {
-                      setShowTutorialModal(false);
-                      setTutorialStep(1);
-                      syncAnki();
-                    }}
-                    className="px-6 py-2.5 bg-green-500 hover:bg-green-600 rounded-xl text-xs font-bold transition-all shadow-lg shadow-green-500/20 text-white"
-                  >
-                    {t('finish')} 🎉
-                  </button>
-                )}
+              <div className="p-6 space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col items-center justify-center gap-2">
+                    <span className="text-xs font-bold text-white/40 uppercase tracking-widest">Suma Tokenów</span>
+                    <span className="text-3xl font-bold text-white">{tokenStats.total.toLocaleString()}</span>
+                  </div>
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col items-center justify-center gap-2">
+                    <span className="text-xs font-bold text-white/40 uppercase tracking-widest">Średnia TPM</span>
+                    <span className="text-3xl font-bold text-white">{Math.round(tokenStats.tpm).toLocaleString()}</span>
+                  </div>
+                </div>
+                <div className="text-xs text-white/40 text-center">
+                  Statystyki obejmują wszystkie zapytania (tłumaczenia, korekty, odpowiedzi).
+                </div>
               </div>
             </motion.div>
           </motion.div>
@@ -3766,3 +3309,4 @@ return await response.json();`)}
     </div>
   );
 }
+
