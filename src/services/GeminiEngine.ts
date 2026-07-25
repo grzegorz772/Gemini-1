@@ -693,7 +693,7 @@ Remember: Output ONLY the raw JSON object. Do not write any explanations outside
     for (const msg of history) {
       messages.push({
         role: msg.role === 'user' ? 'user' : 'model',
-        parts: [{ text: msg.parts[0]?.text || msg.content }]
+        parts: [{ text: msg.parts?.[0]?.text || msg.content }]
       });
     }
 
