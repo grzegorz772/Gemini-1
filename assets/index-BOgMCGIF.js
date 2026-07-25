@@ -666,7 +666,7 @@ Remember: Output ONLY the raw JSON object. Do not write any explanations outside
     Return ONLY the title as plain text, no quotes or additional text.`,i={model:B,contents:D},{text:o,usage:e,latency:s}=await this.executePrompt(i,D);return this.trackUsage(e,i,s),(o==null?void 0:o.trim().replace(/"/g,""))||"Czat"}async checkWriting(g,Q){const B=g.aiModel||"gemini-3.5-flash",C=B.toLowerCase().includes("gemma"),D=`Check the following text in ${g.targetLanguage}: "${Q}". 
     Provide a correction and explanation for each sentence if needed.
     Return as JSON: { "sentences": [ { "original": "...", "corrected": "...", "explanation": "..." } ] }
-    IMPORTANT: Provide strictly valid JSON. Do NOT use double quotes inside the string values. Use single quotes instead if needed.`,i={model:B};C?i.contents=D:(i.contents=D,i.config={responseMimeType:"application/json"});const{text:o,usage:e,latency:s}=await this.executePrompt(i,D);return this.trackUsage(e,i,s),this.parseJson(o||"")}async getExplanationMiniChat(g,Q,B,C){var Y,K,L;const D=C.explainerModel||C.aiModel||"gemini-3.1-flash-lite",i=D.toLowerCase().includes("gemma");let o=`You are a helpful language teacher. 
+    IMPORTANT: Provide strictly valid JSON. Do NOT use double quotes inside the string values. Use single quotes instead if needed.`,i={model:B};C?i.contents=D:(i.contents=D,i.config={responseMimeType:"application/json"});const{text:o,usage:e,latency:s}=await this.executePrompt(i,D);return this.trackUsage(e,i,s),this.parseJson(o||"")}async getExplanationMiniChat(g,Q,B,C){var Y,K,L,J;const D=C.explainerModel||C.aiModel||"gemini-3.1-flash-lite",i=D.toLowerCase().includes("gemma");let o=`You are a helpful language teacher. 
     A student (native language: ${C.nativeLanguage}, learning: ${C.targetLanguage}, level: ${C.cefrLevel}) is asking for an explanation of a mistake they made or something they didn't understand.
     Original student message: "${B.originalText}"
     AI correction was: "${(Y=B.message)==null?void 0:Y.correctedSentence}"
@@ -675,7 +675,7 @@ Remember: Output ONLY the raw JSON object. Do not write any explanations outside
     The student is now asking a follow-up question.
     Respond in ${C.nativeLanguage}. Be concise, friendly, and helpful.`;this.useLocalLLM&&(o+=`
 
-Respond ONLY with the text of your answer. No formatting.`);const e=[];!i&&!this.useLocalLLM&&e.push({role:"system",parts:[{text:o}]});for(const J of g)e.push({role:J.role==="user"?"user":"model",parts:[{text:((L=J.parts[0])==null?void 0:L.text)||J.content}]});e.push({role:"user",parts:[{text:i||this.useLocalLLM?`${o}
+Respond ONLY with the text of your answer. No formatting.`);const e=[];!i&&!this.useLocalLLM&&e.push({role:"system",parts:[{text:o}]});for(const H of g)e.push({role:H.role==="user"?"user":"model",parts:[{text:((J=(L=H.parts)==null?void 0:L[0])==null?void 0:J.text)||H.content}]});e.push({role:"user",parts:[{text:i||this.useLocalLLM?`${o}
 
 Student question: ${Q}`:Q}]});const s={model:D,contents:e},{text:t,usage:N,latency:c}=await this.executePrompt(s);return this.trackUsage(N,this.useLocalLLM?{...s,model:"local-llm"}:s,c),t||"Error"}}function oe(A){throw new Error('Could not dynamically require "'+A+'". Please configure the dynamicRequireTargets or/and ignoreDynamicRequires option of @rollup/plugin-commonjs appropriately for this require call to work.')}var cG={exports:{}};/*!
 
