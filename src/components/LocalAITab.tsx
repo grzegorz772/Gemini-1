@@ -44,11 +44,10 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
     setErrorMessage('');
     
     try {
-      let baseUrl = settings.phoneLLMUrl.trim();
-      if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
-      if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace('/chat/completions', '');
+      let cleanUrl = (settings.phoneLLMUrl || 'http://localhost:9379/v1').trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
+      const modelsEndpoint = cleanUrl.endsWith('/v1') ? `${cleanUrl}/models` : `${cleanUrl}/v1/models`;
       
-      const response = await fetch(`${baseUrl}/models`, {
+      const response = await fetch(modelsEndpoint, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json'
@@ -68,7 +67,7 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
       }
     } catch (err: any) {
       setTestStatus('error');
-      setErrorMessage("Nie można połączyć się z lokalnym AI. Sprawdź, czy telefon jest połączony z hotspotem i czy Gemma jest uruchomiona.");
+      setErrorMessage("Nie można połączyć się z lokalnym AI. Sprawdź, czy telefon jest połączony i czy LiteRT-LM jest uruchomiony na http://localhost:9379/v1.");
     }
   };
 
@@ -91,27 +90,29 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
     const startTime = Date.now();
 
     try {
-      let baseUrl = settings.phoneLLMUrl.trim();
-      if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
-      if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace('/chat/completions', '');
+      let cleanUrl = (settings.phoneLLMUrl || 'http://localhost:9379/v1').trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
+      const chatEndpoint = cleanUrl.endsWith('/v1') ? `${cleanUrl}/chat/completions` : `${cleanUrl}/v1/chat/completions`;
 
       // Prepare conversation payload for OpenAI-compatible endpoint
       const payloadMessages = newMessages
-        .filter(m => m.id !== 'welcome')
+        .filter(m => m.id !== 'welcome' && m.content && m.content.trim())
         .map(m => ({
           role: m.role,
-          content: m.content
+          content: m.content.trim()
         }));
 
       const payload = {
-        model: "gemma-4-E4B-it-gpu",
+        model: "gemma-4-E4B-it-gpu.litertlm",
         messages: payloadMessages,
         temperature: 0.3
       };
 
-      const res = await fetch(`${baseUrl}/chat/completions`, {
+      const res = await fetch(chatEndpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify(payload)
       });
 

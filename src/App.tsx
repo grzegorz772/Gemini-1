@@ -79,7 +79,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   chatStyle: 'neutral',
   chatPersonality: '',
   usePhoneLLM: false,
-  phoneLLMUrl: 'http://192.168.43.1:9379/v1',
+  phoneLLMUrl: 'http://localhost:9379/v1',
 };
 
 const TOP_20_LANGUAGES = [
@@ -1113,7 +1113,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
     // Tylko utwórz nowy engine jeśli go nie ma, lub klucz się zmienił (najlepiej zaktualizować zamiast rekreować, ale ok)
     // Zeby nie tracic lokalnego LLM przy byle zmianie settings:
     if (!engine.current || (key && engine.current.apiKey !== key)) {
-        if (key || settings.useLocalLLM) {
+        if (key || settings.useLocalLLM || settings.usePhoneLLM) {
            engine.current = new GeminiEngine(key || "dummy-key-for-local-llm");
         }
     }
@@ -1122,7 +1122,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
        engine.current.localEngine = localEngineRef.current;
        engine.current.useLocalLLM = settings.useLocalLLM;
        engine.current.usePhoneLLM = settings.usePhoneLLM;
-       engine.current.phoneLLMUrl = settings.phoneLLMUrl;
+       engine.current.phoneLLMUrl = settings.phoneLLMUrl || 'http://localhost:9379/v1';
     }
   }, [settings]);
 
@@ -1140,7 +1140,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
     setIsTyping(true);
 
     try {
-      if (settings.useParallelAI && !settings.useLocalLLM) {
+      if (settings.useParallelAI && !settings.useLocalLLM && !settings.usePhoneLLM) {
         const aiMsgId = (Date.now() + 1).toString();
         
         // 1. Start Correction and Base Response in PARALLEL

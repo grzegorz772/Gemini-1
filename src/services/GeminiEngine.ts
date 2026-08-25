@@ -13,7 +13,7 @@ export class GeminiEngine {
   public localEngine: any = null;
   public useLocalLLM: boolean = false;
   public usePhoneLLM: boolean = false;
-  public phoneLLMUrl: string = 'http://192.168.43.1:9379/v1';
+  public phoneLLMUrl: string = 'http://localhost:9379/v1';
   public usage: TokenUsage = {
     totalTokens: 0,
     lastRequest: null,
@@ -200,23 +200,39 @@ Write 1 to 3 natural sentences. Do not write extremely long paragraphs.`;
         let usage = 0;
         
         if (this.usePhoneLLM) {
-          let baseUrl = this.phoneLLMUrl.trim();
-          if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
-          if (baseUrl.endsWith('/chat/completions')) baseUrl = baseUrl.replace('/chat/completions', '');
+          let cleanUrl = (this.phoneLLMUrl || 'http://localhost:9379/v1').trim().replace(/\/+$/, '');
+          cleanUrl = cleanUrl.replace(/\/chat\/completions$/, '');
+          const endpoint = cleanUrl.endsWith('/v1') ? `${cleanUrl}/chat/completions` : `${cleanUrl}/v1/chat/completions`;
+
+          const validMessages = messages
+            .map(m => ({
+              role: m.role || 'user',
+              content: typeof m.content === 'string' ? m.content.trim() : String(m.content || '')
+            }))
+            .filter(m => m.content.length > 0);
+
+          if (validMessages.length === 0) {
+            validMessages.push({ role: "user", content: "Hello" });
+          }
 
           const payload = {
-            model: "gemma-4-E4B-it-gpu",
-            messages,
+            model: "gemma-4-E4B-it-gpu.litertlm",
+            messages: validMessages,
             temperature: temperature !== undefined ? temperature : 0.3
           };
 
-          const res = await fetch(`${baseUrl}/chat/completions`, {
+          const res = await fetch(endpoint, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
             body: JSON.stringify(payload)
           });
 
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
           const response = await res.json();
           usage = response.usage?.total_tokens || 0;
           textResult = response.choices?.[0]?.message?.content || "";
@@ -239,11 +255,21 @@ Write 1 to 3 natural sentences. Do not write extremely long paragraphs.`;
         textResult = textResult.replace(/<thought>[\s\S]*/gi, '');
         return { text: textResult.trim(), usage, latency };
       } catch (err) {
-        console.error("Local/Phone LLM error:", err);
-        if (this.usePhoneLLM) {
-          return { text: "Nie można połączyć się z lokalnym AI. Sprawdź, czy telefon jest połączony z hotspotem i czy Gemma jest uruchomiona.", usage: 0, latency: 0 };
+        console.warn("Local/Phone LLM error, attempting fallback to Gemini API:", err);
+        // Fallback to Gemini if phone LLM is unavailable or encounters error
+        try {
+          const response = await this.ai.models.generateContent(request);
+          const latency = Date.now() - startTime;
+          const usage = response.usageMetadata?.totalTokenCount || 
+                        Math.ceil((JSON.stringify(request).length + (response.text?.length || 0)) / 4);
+          return { text: response.text || "", usage, latency };
+        } catch (geminiErr) {
+          console.error("Gemini fallback also failed:", geminiErr);
+          if (this.usePhoneLLM) {
+            return { text: "Nie można połączyć się z lokalnym AI (http://localhost:9379/v1). Sprawdź, czy serwer LiteRT-LM jest uruchomiony.", usage: 0, latency: 0 };
+          }
+          return { text: "Error z lokalnym LLM: " + String(err), usage: 0, latency: 0 };
         }
-        return { text: "Error z lokalnym LLM: " + String(err), usage: 0, latency: 0 };
       }
     } else {
       const response = await this.ai.models.generateContent(request);
