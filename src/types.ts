@@ -39,6 +39,8 @@ export interface UserSettings {
   explainerModel?: string;
   chatStyle?: 'formal' | 'informal' | 'neutral';
   chatPersonality?: string;
+  usePhoneLLM: boolean;
+  phoneLLMUrl: string;
 }
 
 export interface GrammarSubsection {

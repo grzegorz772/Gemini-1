@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { MessageCircle, User, PenTool, BookOpen, Settings, Mic } from 'lucide-react';
+import { MessageCircle, User, PenTool, BookOpen, Settings, Mic, FileText, Smartphone } from 'lucide-react';
 
 interface BottomNavProps {
   activeTab: string;
@@ -16,9 +16,11 @@ interface BottomNavProps {
 export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab, labels }) => {
   const tabs = [
     { id: 'chat', icon: MessageCircle, label: labels?.chat || 'Czat' },
+    { id: 'notes', icon: FileText, label: 'Notatki' },
     { id: 'writing', icon: PenTool, label: labels?.writing || 'Pisanie' },
     { id: 'exercises', icon: BookOpen, label: labels?.exercises || 'Ćwiczenia' },
     { id: 'profile', icon: User, label: labels?.settings || 'Profil' },
+    { id: 'local-ai', icon: Smartphone, label: 'Lokalne AI API' },
   ];
 
   return (

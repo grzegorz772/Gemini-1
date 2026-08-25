@@ -36,6 +36,8 @@ import {
 } from 'lucide-react';
 import { GlassCard, GlassButton } from './components/GlassUI';
 import { BottomNav } from './components/BottomNav';
+import { NotesTab } from './components/NotesTab';
+import { LocalAITab } from './components/LocalAITab';
 import { WebGPUSpeech } from './components/WebGPUSpeech';
 import { UserSettings, Message, ChatSession, AnkiWord, SelectedTopic, GrammarSubsection } from './types';
 import { GeminiEngine } from './services/GeminiEngine';
@@ -76,6 +78,8 @@ const DEFAULT_SETTINGS: UserSettings = {
   explainerModel: 'gemini-3.1-flash-lite',
   chatStyle: 'neutral',
   chatPersonality: '',
+  usePhoneLLM: false,
+  phoneLLMUrl: 'http://192.168.43.1:9379/v1',
 };
 
 const TOP_20_LANGUAGES = [
@@ -802,8 +806,10 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
     if (engine.current) {
       engine.current.localEngine = localEngineRef.current;
       engine.current.useLocalLLM = settings.useLocalLLM;
+      engine.current.usePhoneLLM = settings.usePhoneLLM;
+      engine.current.phoneLLMUrl = settings.phoneLLMUrl;
     }
-  }, [settings.useLocalLLM, localEngineRef.current]);
+  }, [settings.useLocalLLM, settings.usePhoneLLM, settings.phoneLLMUrl, localEngineRef.current]);
 
   useEffect(() => {
     const runCheck = async () => {
@@ -1115,6 +1121,8 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
     if (engine.current) {
        engine.current.localEngine = localEngineRef.current;
        engine.current.useLocalLLM = settings.useLocalLLM;
+       engine.current.usePhoneLLM = settings.usePhoneLLM;
+       engine.current.phoneLLMUrl = settings.phoneLLMUrl;
     }
   }, [settings]);
 
@@ -1661,6 +1669,9 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
             </motion.div>
           )}
 
+                    {activeTab === 'notes' && (
+            <NotesTab />
+          )}
           {activeTab === 'writing' && (
             <motion.div
               key="writing"
@@ -2086,6 +2097,10 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
                 />
               </div>
             </motion.div>
+          )}
+
+          {activeTab === 'local-ai' && (
+            <LocalAITab settings={settings} setSettings={setSettings} />
           )}
 
           {activeTab === 'profile' && (
