@@ -27,7 +27,7 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
     {
       id: 'welcome',
       role: 'assistant',
-      content: 'Cześć! Jestem Twoim lokalnym modelem Gemma 4 E4B działającym na telefonie. Przetestuj moje działanie wysyłając wiadomość poniżej!',
+      content: 'Cześć! Jestem Twoim lokalnym modelem działającym na telefonie. Przetestuj moje działanie wysyłając wiadomość poniżej!',
       timestamp: Date.now()
     }
   ]);
@@ -102,7 +102,7 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
         }));
 
       const payload = {
-        model: "gemma-4-E4B-it-gpu.litertlm",
+        model: settings.phoneLLMModel || "gemma-4-E4B-it-gpu.litertlm",
         messages: payloadMessages,
         temperature: 0.3
       };
@@ -194,7 +194,7 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
         {testStatus === 'success' && (
           <div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-full text-xs font-semibold">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            Połączono z Gemma 4 E4B
+            Połączono z Lokalnym modelem
           </div>
         )}
       </div>
@@ -205,39 +205,65 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
             <Smartphone className="text-blue-400" size={24} />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-white">Gemma 4 E4B (Telefon)</h2>
+            <h2 className="text-lg font-bold text-white">Lokalny Model (Telefon)</h2>
             <p className="text-xs text-white/50">Wymaga Termux + LiteRT-LM uruchomionego na telefonie</p>
           </div>
         </div>
 
         <div className="space-y-4">
-          <label className="flex items-center justify-between cursor-pointer p-4 bg-white/5 rounded-xl border border-white/10 hover:bg-white/10 transition-colors">
-            <div className="space-y-1">
-              <span className="font-bold text-white text-sm">Włącz połączenie z telefonem</span>
-              <p className="text-xs text-white/50">Gdy aktywne, cała aplikacja użyje modelu Gemma 4 E4B z telefonu zamiast API Gemini.</p>
-            </div>
-            <div className="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in">
-              <input 
-                type="checkbox" 
-                checked={settings.usePhoneLLM}
-                onChange={(e) => setSettings({...settings, usePhoneLLM: e.target.checked})}
-                className="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 border-gray-600 appearance-none cursor-pointer"
-              />
-              <label className="toggle-label block overflow-hidden h-6 rounded-full bg-gray-600 cursor-pointer"></label>
-            </div>
-          </label>
-
           <div className="space-y-3">
-            <label className="block space-y-1">
-              <span className="text-xs font-bold text-white/70 uppercase tracking-widest">Adres IP telefonu (Endpoint URL)</span>
-              <GlassInput 
-                value={settings.phoneLLMUrl}
-                onChange={(e) => setSettings({...settings, phoneLLMUrl: e.target.value})}
-                placeholder="http://192.168.43.1:9379/v1"
-                className="w-full"
-              />
-            </label>
-            <p className="text-[10px] text-white/40">Zmień ten adres, jeśli twój hotspot Wi-Fi przydzieli telefonowi inne IP.</p>
+            <h3 className="font-bold text-white text-sm">Wybierz dostawcę AI (Główny model)</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <label className={`cursor-pointer p-4 rounded-xl border transition-colors flex items-start gap-3 ${!settings.useLocalLLM && !settings.usePhoneLLM ? 'bg-blue-500/10 border-blue-500' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
+                <input type="radio" className="mt-1 shrink-0 cursor-pointer" name="aiProvider" checked={!settings.useLocalLLM && !settings.usePhoneLLM} onChange={() => setSettings({...settings, useLocalLLM: false, usePhoneLLM: false})} />
+                <div>
+                  <span className="block font-bold text-white text-sm">Gemini API (Cloud)</span>
+                  <span className="text-[11px] text-white/50 block mt-1 leading-tight">Domyślny, szybki model od Google (wymaga klucza)</span>
+                </div>
+              </label>
+
+              <label className={`cursor-pointer p-4 rounded-xl border transition-colors flex items-start gap-3 ${settings.usePhoneLLM ? 'bg-blue-500/10 border-blue-500' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
+                <input type="radio" className="mt-1 shrink-0 cursor-pointer" name="aiProvider" checked={settings.usePhoneLLM} onChange={() => setSettings({...settings, useLocalLLM: false, usePhoneLLM: true})} />
+                <div>
+                  <span className="block font-bold text-white text-sm">Lokalne API (Telefon)</span>
+                  <span className="text-[11px] text-white/50 block mt-1 leading-tight">Zewnętrzny serwer OpenAI-compatible np. LiteRT-LM (Gemma)</span>
+                </div>
+              </label>
+              
+              <label className={`cursor-pointer p-4 rounded-xl border transition-colors flex items-start gap-3 ${settings.useLocalLLM ? 'bg-blue-500/10 border-blue-500' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
+                <input type="radio" className="mt-1 shrink-0 cursor-pointer" name="aiProvider" checked={settings.useLocalLLM} onChange={() => setSettings({...settings, useLocalLLM: true, usePhoneLLM: false})} />
+                <div>
+                  <span className="block font-bold text-white text-sm">WebLLM (Przeglądarka)</span>
+                  <span className="text-[11px] text-white/50 block mt-1 leading-tight">Działa w pamięci przeglądarki z wykorzystaniem WebGPU</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <div className="space-y-3 pt-2">
+            <h3 className="font-bold text-white text-sm border-t border-white/10 pt-4">Konfiguracja Lokalne API (Telefon)</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="block space-y-1">
+                <span className="text-xs font-bold text-white/70 uppercase tracking-widest">Adres IP telefonu (Endpoint URL)</span>
+                <GlassInput 
+                  value={settings.phoneLLMUrl}
+                  onChange={(e) => setSettings({...settings, phoneLLMUrl: e.target.value})}
+                  placeholder="http://192.168.43.1:9379/v1"
+                  className="w-full"
+                />
+              </label>
+              
+              <label className="block space-y-1">
+                <span className="text-xs font-bold text-white/70 uppercase tracking-widest">ID Modelu</span>
+                <GlassInput 
+                  value={settings.phoneLLMModel || ''}
+                  onChange={(e) => setSettings({...settings, phoneLLMModel: e.target.value})}
+                  placeholder="gemma-4-E4B-it-gpu.litertlm"
+                  className="w-full"
+                />
+              </label>
+            </div>
+            <p className="text-[10px] text-white/40">Zmień ten adres, jeśli twój hotspot Wi-Fi przydzieli telefonowi inne IP, lub id modelu, jeśli na serwerze używasz innego modelu.</p>
 
             <div className="pt-4 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-4">
               <GlassButton 
@@ -257,7 +283,7 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
               {testStatus === 'success' && (
                 <div className="flex items-center gap-2 text-emerald-400 text-sm font-bold">
                   <CheckCircle2 size={18} />
-                  <span>Połączono z Gemma 4 E4B!</span>
+                  <span>Połączono z Lokalnym modelem!</span>
                 </div>
               )}
             </div>
@@ -281,7 +307,7 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
             </div>
             <div>
               <h3 className="font-bold text-white text-base flex items-center gap-2">
-                Czat testowy z Gemma 4 E4B
+                Czat testowy z Lokalnym modelem
                 {isGenerating && (
                   <span className="text-[11px] px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded-full animate-pulse font-normal">
                     generowanie...
@@ -382,7 +408,7 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
               </div>
               <div className="bg-white/10 border border-white/10 text-white/70 rounded-2xl rounded-tl-none px-4 py-3 text-sm flex items-center gap-2">
                 <RefreshCw size={14} className="animate-spin text-blue-400" />
-                <span>Gemma 4 E4B przetwarza zapytanie...</span>
+                <span>Lokalny model przetwarza zapytanie...</span>
               </div>
             </motion.div>
           )}

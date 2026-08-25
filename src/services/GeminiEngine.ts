@@ -14,6 +14,7 @@ export class GeminiEngine {
   public useLocalLLM: boolean = false;
   public usePhoneLLM: boolean = false;
   public phoneLLMUrl: string = 'http://localhost:9379/v1';
+  public phoneLLMModel: string = 'gemma-4-E4B-it-gpu.litertlm';
   public usage: TokenUsage = {
     totalTokens: 0,
     lastRequest: null,
@@ -216,7 +217,7 @@ Write 1 to 3 natural sentences. Do not write extremely long paragraphs.`;
           }
 
           const payload = {
-            model: "gemma-4-E4B-it-gpu.litertlm",
+            model: this.phoneLLMModel || "gemma-4-E4B-it-gpu.litertlm",
             messages: validMessages,
             temperature: temperature !== undefined ? temperature : 0.3
           };

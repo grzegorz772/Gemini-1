@@ -80,6 +80,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   chatPersonality: '',
   usePhoneLLM: false,
   phoneLLMUrl: 'http://localhost:9379/v1',
+  phoneLLMModel: 'gemma-4-E4B-it-gpu.litertlm',
 };
 
 const TOP_20_LANGUAGES = [
@@ -808,6 +809,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
       engine.current.useLocalLLM = settings.useLocalLLM;
       engine.current.usePhoneLLM = settings.usePhoneLLM;
       engine.current.phoneLLMUrl = settings.phoneLLMUrl;
+      engine.current.phoneLLMModel = settings.phoneLLMModel || 'gemma-4-E4B-it-gpu.litertlm';
     }
   }, [settings.useLocalLLM, settings.usePhoneLLM, settings.phoneLLMUrl, localEngineRef.current]);
 
@@ -1123,6 +1125,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
        engine.current.useLocalLLM = settings.useLocalLLM;
        engine.current.usePhoneLLM = settings.usePhoneLLM;
        engine.current.phoneLLMUrl = settings.phoneLLMUrl || 'http://localhost:9379/v1';
+       engine.current.phoneLLMModel = settings.phoneLLMModel || 'gemma-4-E4B-it-gpu.litertlm';
     }
   }, [settings]);
 

@@ -41,6 +41,7 @@ export interface UserSettings {
   chatPersonality?: string;
   usePhoneLLM: boolean;
   phoneLLMUrl: string;
+  phoneLLMModel: string;
 }
 
 export interface GrammarSubsection {
