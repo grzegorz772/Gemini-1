@@ -81,6 +81,9 @@ const DEFAULT_SETTINGS: UserSettings = {
   usePhoneLLM: false,
   phoneLLMUrl: 'http://localhost:9379/v1',
   phoneLLMModel: 'gemma-4-E4B-it-gpu.litertlm',
+  useLmStudio: false,
+  lmStudioUrl: 'http://localhost:1234/v1',
+  lmStudioModel: 'local-model',
 };
 
 const TOP_20_LANGUAGES = [
@@ -810,8 +813,11 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
       engine.current.usePhoneLLM = settings.usePhoneLLM;
       engine.current.phoneLLMUrl = settings.phoneLLMUrl;
       engine.current.phoneLLMModel = settings.phoneLLMModel || 'gemma-4-E4B-it-gpu.litertlm';
+      engine.current.useLmStudio = settings.useLmStudio;
+      engine.current.lmStudioUrl = settings.lmStudioUrl;
+      engine.current.lmStudioModel = settings.lmStudioModel || 'local-model';
     }
-  }, [settings.useLocalLLM, settings.usePhoneLLM, settings.phoneLLMUrl, localEngineRef.current]);
+  }, [settings.useLocalLLM, settings.usePhoneLLM, settings.phoneLLMUrl, settings.useLmStudio, settings.lmStudioUrl, localEngineRef.current]);
 
   useEffect(() => {
     const runCheck = async () => {
@@ -1115,7 +1121,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
     // Tylko utwórz nowy engine jeśli go nie ma, lub klucz się zmienił (najlepiej zaktualizować zamiast rekreować, ale ok)
     // Zeby nie tracic lokalnego LLM przy byle zmianie settings:
     if (!engine.current || (key && engine.current.apiKey !== key)) {
-        if (key || settings.useLocalLLM || settings.usePhoneLLM) {
+        if (key || settings.useLocalLLM || settings.usePhoneLLM || settings.useLmStudio) {
            engine.current = new GeminiEngine(key || "dummy-key-for-local-llm");
         }
     }
@@ -1126,6 +1132,9 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
        engine.current.usePhoneLLM = settings.usePhoneLLM;
        engine.current.phoneLLMUrl = settings.phoneLLMUrl || 'http://localhost:9379/v1';
        engine.current.phoneLLMModel = settings.phoneLLMModel || 'gemma-4-E4B-it-gpu.litertlm';
+       engine.current.useLmStudio = settings.useLmStudio;
+       engine.current.lmStudioUrl = settings.lmStudioUrl || 'http://localhost:1234/v1';
+       engine.current.lmStudioModel = settings.lmStudioModel || 'local-model';
     }
   }, [settings]);
 
@@ -1143,7 +1152,7 @@ return { ankiConnect: data, localKnownWords: knownWords.length };`);
     setIsTyping(true);
 
     try {
-      if (settings.useParallelAI && !settings.useLocalLLM && !settings.usePhoneLLM) {
+      if (settings.useParallelAI && !settings.useLocalLLM && !settings.usePhoneLLM && !settings.useLmStudio) {
         const aiMsgId = (Date.now() + 1).toString();
         
         // 1. Start Correction and Base Response in PARALLEL

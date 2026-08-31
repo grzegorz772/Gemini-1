@@ -42,6 +42,9 @@ export interface UserSettings {
   usePhoneLLM: boolean;
   phoneLLMUrl: string;
   phoneLLMModel: string;
+  useLmStudio: boolean;
+  lmStudioUrl: string;
+  lmStudioModel: string;
 }
 
 export interface GrammarSubsection {

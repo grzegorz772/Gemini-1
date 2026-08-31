@@ -15,6 +15,9 @@ export class GeminiEngine {
   public usePhoneLLM: boolean = false;
   public phoneLLMUrl: string = 'http://localhost:9379/v1';
   public phoneLLMModel: string = 'gemma-4-E4B-it-gpu.litertlm';
+  public useLmStudio: boolean = false;
+  public lmStudioUrl: string = 'http://localhost:1234/v1';
+  public lmStudioModel: string = 'local-model';
   public usage: TokenUsage = {
     totalTokens: 0,
     lastRequest: null,
@@ -72,7 +75,7 @@ export class GeminiEngine {
     }
 
     let prompt = '';
-    if (this.useLocalLLM || this.usePhoneLLM) {
+    if (this.useLocalLLM || this.usePhoneLLM || this.useLmStudio) {
       prompt = `You are a friendly conversation partner. You are chatting in ${settings.targetLanguage} with a language learner.
 Their native language is ${settings.nativeLanguage}, level: ${settings.cefrLevel}.
 Mode: ${mode === 'dialogue' ? 'Casual conversation' : 'RPG Text Adventure Narrator'}\nStyle: ${settings.chatStyle || 'neutral'}\nPersonality: ${settings.chatPersonality || 'helpful assistant'}
@@ -164,7 +167,7 @@ Write 1 to 3 natural sentences. Do not write extremely long paragraphs.`;
   ): Promise<{ text: string, usage: number, latency: number }> {
     const startTime = Date.now();
     
-    if (this.useLocalLLM || this.usePhoneLLM) {
+    if (this.useLocalLLM || this.usePhoneLLM || this.useLmStudio) {
       if (this.useLocalLLM && !this.localEngine) {
         return { text: "Error: Opcja 'Użyj LLM zamiast API' jest zaznaczona, ale model nie został jeszcze załadowany (spróbuj Uruchom Załadowany w opcjach).", usage: 0, latency: 0 };
       }
@@ -190,7 +193,7 @@ Write 1 to 3 natural sentences. Do not write extremely long paragraphs.`;
       if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
         const lastMsg = messages[messages.length - 1];
         const textToCheck = ((sysInst || '') + ' ' + (lastMsg.content || '')).toLowerCase();
-        if (textToCheck.includes('json') && (!this.useLocalLLM && !this.usePhoneLLM)) {
+        if (textToCheck.includes('json') && (!this.useLocalLLM && !this.usePhoneLLM && !this.useLmStudio)) {
           lastMsg.content += "\n\n[System note: Remember, your response MUST be ONLY a raw JSON object. Do not add any conversational text before or after the JSON.]";
         }
       }
@@ -200,8 +203,14 @@ Write 1 to 3 natural sentences. Do not write extremely long paragraphs.`;
         let textResult = "";
         let usage = 0;
         
-        if (this.usePhoneLLM) {
-          let cleanUrl = (this.phoneLLMUrl || 'http://localhost:9379/v1').trim().replace(/\/+$/, '');
+        if (this.usePhoneLLM || this.useLmStudio) {
+          let cleanUrl = this.useLmStudio 
+            ? (this.lmStudioUrl || 'http://localhost:1234/v1').trim().replace(/\/+$/, '')
+            : (this.phoneLLMUrl || 'http://localhost:9379/v1').trim().replace(/\/+$/, '');
+            
+          const currentModel = this.useLmStudio 
+            ? (this.lmStudioModel || 'local-model') 
+            : (this.phoneLLMModel || 'gemma-4-E4B-it-gpu.litertlm');
           cleanUrl = cleanUrl.replace(/\/chat\/completions$/, '');
           const endpoint = cleanUrl.endsWith('/v1') ? `${cleanUrl}/chat/completions` : `${cleanUrl}/v1/chat/completions`;
 
@@ -217,7 +226,7 @@ Write 1 to 3 natural sentences. Do not write extremely long paragraphs.`;
           }
 
           const payload = {
-            model: this.phoneLLMModel || "gemma-4-E4B-it-gpu.litertlm",
+            model: currentModel,
             messages: validMessages,
             temperature: temperature !== undefined ? temperature : 0.3
           };
@@ -289,7 +298,7 @@ Write 1 to 3 natural sentences. Do not write extremely long paragraphs.`;
     mode: 'dialogue' | 'narrative',
     knownWords?: string[]
   ): Promise<Message> {
-    if (this.useLocalLLM || this.usePhoneLLM) {
+    if (this.useLocalLLM || this.usePhoneLLM || this.useLmStudio) {
       const baseResponse = await this.getBaseResponse(history, userInput, settings, mode, knownWords);
       const sentences = await this.getTranslation(baseResponse, settings);
       const correctionData = await this.getCorrection(userInput, settings);
@@ -349,7 +358,7 @@ Write 1 to 3 natural sentences. Do not write extremely long paragraphs.`;
       6. Keep the conversation engaging.
     `;
 
-    if (this.useLocalLLM || this.usePhoneLLM) {
+    if (this.useLocalLLM || this.usePhoneLLM || this.useLmStudio) {
       systemInstruction = `You are a friendly conversation partner for a ${settings.targetLanguage} learner.
 Native language: ${settings.nativeLanguage}. Level: ${settings.cefrLevel}.
 Respond ONLY with a valid JSON object. No conversational filler, no markdown code blocks. Just raw JSON.
@@ -441,13 +450,13 @@ JSON structure:
     Return JSON: { "topics": [ { "topic": "Short Title 1", "description": "Detailed instructions in ${settings.nativeLanguage}" } ] }
     IMPORTANT: Provide strictly valid JSON. Do NOT use double quotes inside the string values. Use single quotes instead if needed.`;
 
-    if (this.useLocalLLM || this.usePhoneLLM) {
+    if (this.useLocalLLM || this.usePhoneLLM || this.useLmStudio) {
       prompt += `\n\nCRITICAL: Respond ONLY with a valid JSON object. Do NOT include any intro, markdown formatting, code blocks, or explanations outside the JSON. Just raw JSON.`;
     }
 
     const request: any = { model };
 
-    if (isGemma || this.useLocalLLM || this.usePhoneLLM) {
+    if (isGemma || this.useLocalLLM || this.usePhoneLLM || this.useLmStudio) {
       request.contents = prompt;
     } else {
       request.contents = prompt;
@@ -471,13 +480,13 @@ JSON structure:
     Return JSON: { "isCorrect": boolean, "corrected": "...", "explanation": "Brief explanation in ${settings.nativeLanguage}" }
     IMPORTANT: Provide strictly valid JSON. Do NOT use double quotes inside the string values. Use single quotes instead if needed.`;
 
-    if (this.useLocalLLM || this.usePhoneLLM) {
+    if (this.useLocalLLM || this.usePhoneLLM || this.useLmStudio) {
       prompt += `\n\nCRITICAL: Respond ONLY with a valid JSON object. Do NOT include any intro, markdown formatting, code blocks, or explanations outside the JSON. Just raw JSON.`;
     }
 
     const request: any = { model };
 
-    if (isGemma || this.useLocalLLM || this.usePhoneLLM) {
+    if (isGemma || this.useLocalLLM || this.usePhoneLLM || this.useLmStudio) {
       request.contents = prompt;
     } else {
       request.contents = prompt;
@@ -516,13 +525,13 @@ JSON structure:
     Return as a JSON array of objects: [ { "question": "...", "answer": "...", "explanation": "..." } ]
     IMPORTANT: Provide strictly valid JSON. Do NOT use double quotes inside the string values. Use single quotes instead if needed.`;
 
-    if (this.useLocalLLM || this.usePhoneLLM) {
+    if (this.useLocalLLM || this.usePhoneLLM || this.useLmStudio) {
       prompt += `\n\nCRITICAL: Respond ONLY with a valid JSON array of objects. Do NOT include any intro, markdown formatting, code blocks, or explanations outside the JSON. Just raw JSON.`;
     }
 
     const request: any = { model };
 
-    if (isGemma || this.useLocalLLM || this.usePhoneLLM) {
+    if (isGemma || this.useLocalLLM || this.usePhoneLLM || this.useLmStudio) {
       request.contents = prompt;
     } else {
       request.contents = prompt;
@@ -542,7 +551,7 @@ JSON structure:
     const model = settings.translationModel || settings.aiModel || "gemini-3.5-flash";
     const isGemma = model.toLowerCase().includes('gemma');
 
-    if (this.useLocalLLM || this.usePhoneLLM) {
+    if (this.useLocalLLM || this.usePhoneLLM || this.useLmStudio) {
       const prompt = `Translate the following text from ${settings.targetLanguage} to ${settings.nativeLanguage}: "${text}"
 Respond ONLY with a JSON object in this format:
 {
@@ -584,7 +593,7 @@ Output ONLY the raw JSON.`;
     const model = settings.correctionModel || settings.aiModel || "gemini-3.5-flash";
     const isGemma = model.toLowerCase().includes('gemma');
 
-    if (this.useLocalLLM || this.usePhoneLLM) {
+    if (this.useLocalLLM || this.usePhoneLLM || this.useLmStudio) {
       const prompt = `You are a professional language teacher. Analyze this message written by a learner of ${settings.targetLanguage}: "${userText}"
 If the message is correct and natural in ${settings.targetLanguage}, or if it is written in ${settings.nativeLanguage}, respond exactly with this JSON:
 {
@@ -752,12 +761,12 @@ Remember: Output ONLY the raw JSON object. Do not write any explanations outside
     - dostosowuj trudność do poziomu CEFR użytkownika (${settings.cefrLevel}),
     - odpowiadaj w języku ustawionym przez użytkownika (${settings.nativeLanguage}).`;
 
-    if (this.useLocalLLM || this.usePhoneLLM) {
+    if (this.useLocalLLM || this.usePhoneLLM || this.useLmStudio) {
       systemPrompt += `\n\nRespond ONLY with the text of your answer. No formatting.`;
     }
 
     const messages = [];
-    if (!isGemma && (!this.useLocalLLM && !this.usePhoneLLM)) {
+    if (!isGemma && (!this.useLocalLLM && !this.usePhoneLLM && !this.useLmStudio)) {
       messages.push({ role: "system", parts: [{ text: systemPrompt }] });
     }
 
@@ -770,7 +779,7 @@ Remember: Output ONLY the raw JSON object. Do not write any explanations outside
 
     messages.push({
       role: 'user',
-      parts: [{ text: (isGemma || this.useLocalLLM || this.usePhoneLLM) ? `${systemPrompt}\n\nStudent question: ${userMessage}` : userMessage }]
+      parts: [{ text: (isGemma || this.useLocalLLM || this.usePhoneLLM || this.useLmStudio) ? `${systemPrompt}\n\nStudent question: ${userMessage}` : userMessage }]
     });
 
     const request: any = { model, contents: messages };

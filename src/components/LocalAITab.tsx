@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Smartphone, CheckCircle2, XCircle, RefreshCw, Wifi, Send, Trash2, Bot, User, Sparkles, Clock, Zap } from 'lucide-react';
+import { Smartphone, Monitor, CheckCircle2, XCircle, RefreshCw, Wifi, Send, Trash2, Bot, User, Sparkles, Clock, Zap } from 'lucide-react';
 import { GlassCard, GlassButton, GlassInput } from './GlassUI';
 import { UserSettings } from '../types';
 
@@ -44,7 +44,8 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
     setErrorMessage('');
     
     try {
-      let cleanUrl = (settings.phoneLLMUrl || 'http://localhost:9379/v1').trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
+      let activeUrl = settings.useLmStudio ? (settings.lmStudioUrl || 'http://localhost:1234/v1') : (settings.phoneLLMUrl || 'http://localhost:9379/v1');
+      let cleanUrl = activeUrl.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
       const modelsEndpoint = cleanUrl.endsWith('/v1') ? `${cleanUrl}/models` : `${cleanUrl}/v1/models`;
       
       const response = await fetch(modelsEndpoint, {
@@ -67,7 +68,9 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
       }
     } catch (err: any) {
       setTestStatus('error');
-      setErrorMessage("Nie można połączyć się z lokalnym AI. Sprawdź, czy telefon jest połączony i czy LiteRT-LM jest uruchomiony na http://localhost:9379/v1.");
+      setErrorMessage(settings.useLmStudio 
+        ? "Nie można połączyć się z LM Studio. Upewnij się, że serwer działa na ustawionym adresie (np. http://localhost:1234/v1)." 
+        : "Nie można połączyć się z lokalnym AI (Telefon). Sprawdź, czy telefon jest połączony i czy LiteRT-LM jest uruchomiony.");
     }
   };
 
@@ -90,7 +93,8 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
     const startTime = Date.now();
 
     try {
-      let cleanUrl = (settings.phoneLLMUrl || 'http://localhost:9379/v1').trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
+      let activeUrl = settings.useLmStudio ? (settings.lmStudioUrl || 'http://localhost:1234/v1') : (settings.phoneLLMUrl || 'http://localhost:9379/v1');
+      let cleanUrl = activeUrl.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
       const chatEndpoint = cleanUrl.endsWith('/v1') ? `${cleanUrl}/chat/completions` : `${cleanUrl}/v1/chat/completions`;
 
       // Prepare conversation payload for OpenAI-compatible endpoint
@@ -102,7 +106,7 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
         }));
 
       const payload = {
-        model: settings.phoneLLMModel || "gemma-4-E4B-it-gpu.litertlm",
+        model: settings.useLmStudio ? (settings.lmStudioModel || 'local-model') : (settings.phoneLLMModel || 'gemma-4-E4B-it-gpu.litertlm'),
         messages: payloadMessages,
         temperature: 0.3
       };
@@ -194,7 +198,7 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
         {testStatus === 'success' && (
           <div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-full text-xs font-semibold">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            Połączono z Lokalnym modelem
+            Połączono z {settings.useLmStudio ? 'LM Studio' : 'API Telefonu'}
           </div>
         )}
       </div>
@@ -202,44 +206,57 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
       <GlassCard className="p-6 space-y-6">
         <div className="flex items-center gap-4 border-b border-white/10 pb-4">
           <div className="p-3 bg-blue-500/20 rounded-xl">
-            <Smartphone className="text-blue-400" size={24} />
+            {settings.useLmStudio ? <Monitor className="text-blue-400" size={24} /> : <Smartphone className="text-blue-400" size={24} />}
           </div>
           <div>
-            <h2 className="text-lg font-bold text-white">Lokalny Model (Telefon)</h2>
-            <p className="text-xs text-white/50">Wymaga Termux + LiteRT-LM uruchomionego na telefonie</p>
+            <h2 className="text-lg font-bold text-white">
+              {settings.useLmStudio ? 'Lokalny Model (LM Studio)' : 'Lokalny Model (Telefon)'}
+            </h2>
+            <p className="text-xs text-white/50">
+              {settings.useLmStudio ? 'Wymaga uruchomienia LM Studio na PC (Local Inference Server)' : 'Wymaga Termux + LiteRT-LM uruchomionego na telefonie'}
+            </p>
           </div>
         </div>
 
         <div className="space-y-4">
           <div className="space-y-3">
             <h3 className="font-bold text-white text-sm">Wybierz dostawcę AI (Główny model)</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <label className={`cursor-pointer p-4 rounded-xl border transition-colors flex items-start gap-3 ${!settings.useLocalLLM && !settings.usePhoneLLM ? 'bg-blue-500/10 border-blue-500' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
-                <input type="radio" className="mt-1 shrink-0 cursor-pointer" name="aiProvider" checked={!settings.useLocalLLM && !settings.usePhoneLLM} onChange={() => setSettings({...settings, useLocalLLM: false, usePhoneLLM: false})} />
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              <label className={`cursor-pointer p-4 rounded-xl border transition-colors flex items-start gap-3 ${!settings.useLocalLLM && !settings.usePhoneLLM && !settings.useLmStudio ? 'bg-blue-500/10 border-blue-500' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
+                <input type="radio" className="mt-1 shrink-0 cursor-pointer" name="aiProvider" checked={!settings.useLocalLLM && !settings.usePhoneLLM && !settings.useLmStudio} onChange={() => setSettings({...settings, useLocalLLM: false, usePhoneLLM: false, useLmStudio: false})} />
                 <div>
-                  <span className="block font-bold text-white text-sm">Gemini API (Cloud)</span>
+                  <span className="block font-bold text-white text-sm">Gemini API</span>
                   <span className="text-[11px] text-white/50 block mt-1 leading-tight">Domyślny, szybki model od Google (wymaga klucza)</span>
                 </div>
               </label>
 
               <label className={`cursor-pointer p-4 rounded-xl border transition-colors flex items-start gap-3 ${settings.usePhoneLLM ? 'bg-blue-500/10 border-blue-500' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
-                <input type="radio" className="mt-1 shrink-0 cursor-pointer" name="aiProvider" checked={settings.usePhoneLLM} onChange={() => setSettings({...settings, useLocalLLM: false, usePhoneLLM: true})} />
+                <input type="radio" className="mt-1 shrink-0 cursor-pointer" name="aiProvider" checked={settings.usePhoneLLM} onChange={() => setSettings({...settings, useLocalLLM: false, usePhoneLLM: true, useLmStudio: false})} />
                 <div>
                   <span className="block font-bold text-white text-sm">Lokalne API (Telefon)</span>
-                  <span className="text-[11px] text-white/50 block mt-1 leading-tight">Zewnętrzny serwer OpenAI-compatible np. LiteRT-LM (Gemma)</span>
+                  <span className="text-[11px] text-white/50 block mt-1 leading-tight">Zewnętrzny serwer OpenAI-compatible (LiteRT-LM)</span>
+                </div>
+              </label>
+
+              <label className={`cursor-pointer p-4 rounded-xl border transition-colors flex items-start gap-3 ${settings.useLmStudio ? 'bg-blue-500/10 border-blue-500' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
+                <input type="radio" className="mt-1 shrink-0 cursor-pointer" name="aiProvider" checked={settings.useLmStudio} onChange={() => setSettings({...settings, useLocalLLM: false, usePhoneLLM: false, useLmStudio: true})} />
+                <div>
+                  <span className="block font-bold text-white text-sm">LM Studio (PC)</span>
+                  <span className="text-[11px] text-white/50 block mt-1 leading-tight">Lokalny model hostowany w aplikacji LM Studio</span>
                 </div>
               </label>
               
               <label className={`cursor-pointer p-4 rounded-xl border transition-colors flex items-start gap-3 ${settings.useLocalLLM ? 'bg-blue-500/10 border-blue-500' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>
-                <input type="radio" className="mt-1 shrink-0 cursor-pointer" name="aiProvider" checked={settings.useLocalLLM} onChange={() => setSettings({...settings, useLocalLLM: true, usePhoneLLM: false})} />
+                <input type="radio" className="mt-1 shrink-0 cursor-pointer" name="aiProvider" checked={settings.useLocalLLM} onChange={() => setSettings({...settings, useLocalLLM: true, usePhoneLLM: false, useLmStudio: false})} />
                 <div>
                   <span className="block font-bold text-white text-sm">WebLLM (Przeglądarka)</span>
-                  <span className="text-[11px] text-white/50 block mt-1 leading-tight">Działa w pamięci przeglądarki z wykorzystaniem WebGPU</span>
+                  <span className="text-[11px] text-white/50 block mt-1 leading-tight">Działa w pamięci przeglądarki przez WebGPU</span>
                 </div>
               </label>
             </div>
           </div>
 
+          {settings.usePhoneLLM && (
           <div className="space-y-3 pt-2">
             <h3 className="font-bold text-white text-sm border-t border-white/10 pt-4">Konfiguracja Lokalne API (Telefon)</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -264,7 +281,38 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
               </label>
             </div>
             <p className="text-[10px] text-white/40">Zmień ten adres, jeśli twój hotspot Wi-Fi przydzieli telefonowi inne IP, lub id modelu, jeśli na serwerze używasz innego modelu.</p>
-
+          </div>
+          )}
+          
+          {settings.useLmStudio && (
+          <div className="space-y-3 pt-2">
+            <h3 className="font-bold text-white text-sm border-t border-white/10 pt-4">Konfiguracja LM Studio (PC)</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="block space-y-1">
+                <span className="text-xs font-bold text-white/70 uppercase tracking-widest">Adres lokalny (Endpoint URL)</span>
+                <GlassInput 
+                  value={settings.lmStudioUrl || 'http://localhost:1234/v1'}
+                  onChange={(e) => setSettings({...settings, lmStudioUrl: e.target.value})}
+                  placeholder="http://localhost:1234/v1"
+                  className="w-full"
+                />
+              </label>
+              
+              <label className="block space-y-1">
+                <span className="text-xs font-bold text-white/70 uppercase tracking-widest">ID Modelu</span>
+                <GlassInput 
+                  value={settings.lmStudioModel || 'local-model'}
+                  onChange={(e) => setSettings({...settings, lmStudioModel: e.target.value})}
+                  placeholder="local-model"
+                  className="w-full"
+                />
+              </label>
+            </div>
+            <p className="text-[10px] text-white/40">LM Studio domyślnie uruchamia serwer na porcie 1234.</p>
+          </div>
+          )}
+          
+          <div className="space-y-3 pt-2">
             <div className="pt-4 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-4">
               <GlassButton 
                 variant={testStatus === 'success' ? 'secondary' : 'primary'}
@@ -283,7 +331,7 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
               {testStatus === 'success' && (
                 <div className="flex items-center gap-2 text-emerald-400 text-sm font-bold">
                   <CheckCircle2 size={18} />
-                  <span>Połączono z Lokalnym modelem!</span>
+                  <span>Połączono z {settings.useLmStudio ? 'LM Studio' : 'API Telefonu'}!</span>
                 </div>
               )}
             </div>
@@ -307,7 +355,7 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
             </div>
             <div>
               <h3 className="font-bold text-white text-base flex items-center gap-2">
-                Czat testowy z Lokalnym modelem
+                {settings.useLmStudio ? 'Czat testowy z LM Studio' : 'Czat testowy z API Telefonu'}
                 {isGenerating && (
                   <span className="text-[11px] px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded-full animate-pulse font-normal">
                     generowanie...
@@ -408,7 +456,7 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
               </div>
               <div className="bg-white/10 border border-white/10 text-white/70 rounded-2xl rounded-tl-none px-4 py-3 text-sm flex items-center gap-2">
                 <RefreshCw size={14} className="animate-spin text-blue-400" />
-                <span>Lokalny model przetwarza zapytanie...</span>
+                <span>{settings.useLmStudio ? 'LM Studio' : 'Lokalny model'} przetwarza zapytanie...</span>
               </div>
             </motion.div>
           )}
@@ -423,7 +471,7 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
             onChange={(e) => setInputPrompt(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={isGenerating}
-            placeholder="Napisz wiadomość testową do modelu Gemma na telefonie..."
+            placeholder="Napisz wiadomość testową..."
             className="flex-1"
           />
           <GlassButton
@@ -443,6 +491,16 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
 
       <GlassCard className="p-6">
         <h3 className="font-bold mb-4 text-white/80">Instrukcja uruchomienia:</h3>
+        {settings.useLmStudio ? (
+        <ol className="list-decimal pl-5 space-y-2 text-sm text-white/60">
+          <li>Zainstaluj i uruchom aplikację <strong>LM Studio</strong> na komputerze.</li>
+          <li>Pobierz i załaduj dowolny model z sekcji "Search".</li>
+          <li>Przejdź do zakładki <strong>"Local Server"</strong> (ikona podwójnej strzałki/serwera po lewej stronie).</li>
+          <li>Kliknij zielony przycisk <strong>Start Server</strong> na górze.</li>
+          <li>Upewnij się, że port w LM Studio to <code>1234</code> (domyślny), a adres powyżej to <code>http://localhost:1234/v1</code>.</li>
+          <li>Kliknij "Test połączenia", a potem możesz przetestować działanie w oknie czatu wyżej!</li>
+        </ol>
+        ) : (
         <ol className="list-decimal pl-5 space-y-2 text-sm text-white/60">
           <li>Włącz <strong>Hotspot Wi-Fi</strong> na telefonie (lub tablecie).</li>
           <li>Połącz oba urządzenia do tej samej sieci.</li>
@@ -451,6 +509,7 @@ export const LocalAITab: React.FC<LocalAITabProps> = ({ settings, setSettings })
           <li>Odpal LiteRT-LM (np. poleceniem <code>./litert-lm --model gemma-4-E4B-it-gpu --host 0.0.0.0 --port 9379</code>).</li>
           <li>Wpisz poprawny adres powyżej, kliknij "Test połączenia" lub od razu wyślij wiadomość testową w czacie powyżej.</li>
         </ol>
+        )}
       </GlassCard>
     </motion.div>
   );
